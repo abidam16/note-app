@@ -16,10 +16,15 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+type tokenSigner func(token *jwt.Token, secret []byte) (string, error)
+type randomReader func(p []byte) (n int, err error)
+
 type TokenManager struct {
 	secret         []byte
 	issuer         string
 	accessTokenTTL time.Duration
+	sign           tokenSigner
+	readRandom     randomReader
 }
 
 func NewTokenManager(secret, issuer string, accessTokenTTL time.Duration) TokenManager {
@@ -27,7 +32,13 @@ func NewTokenManager(secret, issuer string, accessTokenTTL time.Duration) TokenM
 		secret:         []byte(secret),
 		issuer:         issuer,
 		accessTokenTTL: accessTokenTTL,
+		sign:           defaultTokenSigner,
+		readRandom:     rand.Read,
 	}
+}
+
+func defaultTokenSigner(token *jwt.Token, secret []byte) (string, error) {
+	return token.SignedString(secret)
 }
 
 func (m TokenManager) GenerateAccessToken(userID, email string, now time.Time) (string, time.Time, error) {
@@ -43,7 +54,11 @@ func (m TokenManager) GenerateAccessToken(userID, email string, now time.Time) (
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString(m.secret)
+	signer := m.sign
+	if signer == nil {
+		signer = defaultTokenSigner
+	}
+	signed, err := signer(token, m.secret)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sign access token: %w", err)
 	}
@@ -72,7 +87,11 @@ func (m TokenManager) ParseAccessToken(token string) (*Claims, error) {
 
 func (m TokenManager) NewRefreshToken() (raw string, hash string, err error) {
 	bytes := make([]byte, 32)
-	if _, err = rand.Read(bytes); err != nil {
+	reader := m.readRandom
+	if reader == nil {
+		reader = rand.Read
+	}
+	if _, err = reader(bytes); err != nil {
 		return "", "", fmt.Errorf("generate refresh token: %w", err)
 	}
 

@@ -19,30 +19,32 @@ import (
 )
 
 type Server struct {
-	logger           *slog.Logger
-	authService      application.AuthService
-	workspaceService application.WorkspaceService
-	folderService    application.FolderService
-	pageService      application.PageService
-	revisionService  application.RevisionService
-	commentService   application.CommentService
-	searchService    application.SearchService
-	tokenManager     appauth.TokenManager
-	storage          storage.FileStorage
+	logger              *slog.Logger
+	authService         application.AuthService
+	workspaceService    application.WorkspaceService
+	folderService       application.FolderService
+	pageService         application.PageService
+	revisionService     application.RevisionService
+	commentService      application.CommentService
+	searchService       application.SearchService
+	notificationService application.NotificationService
+	tokenManager        appauth.TokenManager
+	storage             storage.FileStorage
 }
 
 func NewServer(logger *slog.Logger, authService application.AuthService, workspaceService application.WorkspaceService, folderService application.FolderService, pageService application.PageService, revisionService application.RevisionService, tokenManager appauth.TokenManager, fileStorage storage.FileStorage) Server {
 	return Server{
-		logger:           logger,
-		authService:      authService,
-		workspaceService: workspaceService,
-		folderService:    folderService,
-		pageService:      pageService,
-		revisionService:  revisionService,
-		commentService:   application.CommentService{},
-		searchService:    application.SearchService{},
-		tokenManager:     tokenManager,
-		storage:          fileStorage,
+		logger:              logger,
+		authService:         authService,
+		workspaceService:    workspaceService,
+		folderService:       folderService,
+		pageService:         pageService,
+		revisionService:     revisionService,
+		commentService:      application.CommentService{},
+		searchService:       application.SearchService{},
+		notificationService: application.NotificationService{},
+		tokenManager:        tokenManager,
+		storage:             fileStorage,
 	}
 }
 
@@ -53,6 +55,11 @@ func (s Server) WithCommentService(commentService application.CommentService) Se
 
 func (s Server) WithSearchService(searchService application.SearchService) Server {
 	s.searchService = searchService
+	return s
+}
+
+func (s Server) WithNotificationService(notificationService application.NotificationService) Server {
+	s.notificationService = notificationService
 	return s
 }
 
@@ -102,6 +109,8 @@ func (s Server) Handler() nethttp.Handler {
 			r.Post("/pages/{pageID}/comments", s.handleCreateComment())
 			r.Get("/pages/{pageID}/comments", s.handleListComments())
 			r.Post("/comments/{commentID}/resolve", s.handleResolveComment())
+			r.Get("/notifications", s.handleListNotifications())
+			r.Post("/notifications/{notificationID}/read", s.handleMarkNotificationRead())
 			r.Post("/trash/{trashItemID}/restore", s.handleRestoreTrashItem())
 		})
 	})

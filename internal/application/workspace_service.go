@@ -41,12 +41,17 @@ type UpdateMemberRoleInput struct {
 }
 
 type WorkspaceService struct {
-	workspaces WorkspaceRepository
-	users      UserRepository
+	workspaces    WorkspaceRepository
+	users         UserRepository
+	notifications NotificationEventPublisher
 }
 
-func NewWorkspaceService(workspaces WorkspaceRepository, users UserRepository) WorkspaceService {
-	return WorkspaceService{workspaces: workspaces, users: users}
+func NewWorkspaceService(workspaces WorkspaceRepository, users UserRepository, notifications ...NotificationEventPublisher) WorkspaceService {
+	service := WorkspaceService{workspaces: workspaces, users: users}
+	if len(notifications) > 0 {
+		service.notifications = notifications[0]
+	}
+	return service
 }
 
 func (s WorkspaceService) CreateWorkspace(ctx context.Context, actorID string, input CreateWorkspaceInput) (domain.Workspace, domain.WorkspaceMember, error) {
@@ -109,7 +114,18 @@ func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, inpu
 		CreatedAt:   now,
 	}
 
-	return s.workspaces.CreateInvitation(ctx, invitation)
+	saved, err := s.workspaces.CreateInvitation(ctx, invitation)
+	if err != nil {
+		return domain.WorkspaceInvitation{}, err
+	}
+
+	if s.notifications != nil {
+		if err := s.notifications.NotifyInvitationCreated(ctx, saved); err != nil {
+			return domain.WorkspaceInvitation{}, err
+		}
+	}
+
+	return saved, nil
 }
 
 func (s WorkspaceService) AcceptInvitation(ctx context.Context, actorID, invitationID string) (domain.WorkspaceMember, error) {

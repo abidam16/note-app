@@ -615,3 +615,30 @@
 - Create folder -> create page -> update draft -> save revision -> edit draft -> save second revision -> compare -> restore
 - Add comment -> resolve comment -> verify notification creation
 - Delete page to trash -> restore page -> verify revisions remain intact
+### 24. Coverage Hardening and Testability Refactor
+- Feature name: Coverage hardening and testability refactor
+- Purpose: achieve and sustain high confidence automated coverage for all backend packages
+- Single use case: maintainers run full test coverage and every package remains above `90%`
+- Dependencies: features 1 through 23
+- API endpoints:
+  - no new API surface; applies to all existing endpoints and startup commands
+- Request/response contract:
+  - unchanged
+- Database changes:
+  - none
+- Business rules:
+  - no functional behavior changes allowed
+  - refactors must preserve existing domain rules and API semantics
+  - coverage must include positive, negative, and edge-case paths
+- Error cases:
+  - startup and shutdown failures
+  - repository query/scan/transaction failures
+  - handler decode/validation/authz failures
+- Tests:
+  - unit tests for pure logic and error mapping branches
+  - integration tests for PostgreSQL-backed repositories
+  - command package tests using extracted run functions
+- Done criteria:
+  - every package currently below `90%` reaches `>90%`
+  - `go test ./...` passes
+  - `go test ./... -cover` confirms package coverage targets

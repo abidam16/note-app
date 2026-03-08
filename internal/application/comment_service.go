@@ -32,17 +32,22 @@ type ResolveCommentInput struct {
 }
 
 type CommentService struct {
-	comments    CommentRepository
-	pages       CommentPageRepository
-	memberships WorkspaceMembershipReader
+	comments      CommentRepository
+	pages         CommentPageRepository
+	memberships   WorkspaceMembershipReader
+	notifications NotificationEventPublisher
 }
 
-func NewCommentService(comments CommentRepository, pages CommentPageRepository, memberships WorkspaceMembershipReader) CommentService {
-	return CommentService{
+func NewCommentService(comments CommentRepository, pages CommentPageRepository, memberships WorkspaceMembershipReader, notifications ...NotificationEventPublisher) CommentService {
+	service := CommentService{
 		comments:    comments,
 		pages:       pages,
 		memberships: memberships,
 	}
+	if len(notifications) > 0 {
+		service.notifications = notifications[0]
+	}
+	return service
 }
 
 func (s CommentService) CreateComment(ctx context.Context, actorID string, input CreateCommentInput) (domain.PageComment, error) {
@@ -68,7 +73,18 @@ func (s CommentService) CreateComment(ctx context.Context, actorID string, input
 		CreatedAt: time.Now().UTC(),
 	}
 
-	return s.comments.Create(ctx, comment)
+	saved, err := s.comments.Create(ctx, comment)
+	if err != nil {
+		return domain.PageComment{}, err
+	}
+
+	if s.notifications != nil {
+		if err := s.notifications.NotifyCommentCreated(ctx, page, saved); err != nil {
+			return domain.PageComment{}, err
+		}
+	}
+
+	return saved, nil
 }
 
 func (s CommentService) ListComments(ctx context.Context, actorID, pageID string) ([]domain.PageComment, error) {

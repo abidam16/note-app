@@ -590,3 +590,29 @@ func (s Server) handleRestoreTrashItem() http.HandlerFunc {
 		WriteJSON(w, http.StatusOK, page)
 	}
 }
+
+func (s Server) handleListNotifications() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		notifications, err := s.notificationService.ListNotifications(r.Context(), requestContextUserID(r.Context()))
+		if err != nil {
+			status, apiErr := mapError(err)
+			WriteError(w, r, status, apiErr)
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, notifications)
+	}
+}
+
+func (s Server) handleMarkNotificationRead() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		notification, err := s.notificationService.MarkNotificationRead(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "notificationID"))
+		if err != nil {
+			status, apiErr := mapError(err)
+			WriteError(w, r, status, apiErr)
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, notification)
+	}
+}

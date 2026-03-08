@@ -19,6 +19,7 @@ type FolderRepository interface {
 
 type WorkspaceMembershipReader interface {
 	GetMembershipByUserID(ctx context.Context, workspaceID, userID string) (domain.WorkspaceMember, error)
+	ListMembers(ctx context.Context, workspaceID string) ([]domain.WorkspaceMember, error)
 }
 
 type CreateFolderInput struct {

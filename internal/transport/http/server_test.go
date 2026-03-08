@@ -30,6 +30,10 @@ func (r *testMembershipRepo) GetMembershipByUserID(_ context.Context, workspaceI
 	return domain.WorkspaceMember{}, domain.ErrForbidden
 }
 
+func (r *testMembershipRepo) ListMembers(_ context.Context, workspaceID string) ([]domain.WorkspaceMember, error) {
+	return r.memberships[workspaceID], nil
+}
+
 type testFolderRepo struct {
 	byID        map[string]domain.Folder
 	byWorkspace map[string][]domain.Folder
@@ -1112,5 +1116,146 @@ func TestTrashEndpoints(t *testing.T) {
 	server.Handler().ServeHTTP(restoreRec, restoreReq)
 	if restoreRec.Code != http.StatusOK {
 		t.Fatalf("expected restore status 200, got %d body=%s", restoreRec.Code, restoreRec.Body.String())
+	}
+}
+
+type testUserRepo struct {
+	byEmail map[string]domain.User
+}
+
+func (r *testUserRepo) Create(_ context.Context, user domain.User) (domain.User, error) {
+	if r.byEmail == nil {
+		r.byEmail = map[string]domain.User{}
+	}
+	r.byEmail[user.Email] = user
+	return user, nil
+}
+
+func (r *testUserRepo) GetByEmail(_ context.Context, email string) (domain.User, error) {
+	if user, ok := r.byEmail[email]; ok {
+		return user, nil
+	}
+	return domain.User{}, domain.ErrNotFound
+}
+
+func (r *testUserRepo) GetByID(_ context.Context, _ string) (domain.User, error) {
+	return domain.User{}, domain.ErrNotFound
+}
+
+type testNotificationRepo struct {
+	notifications map[string]domain.Notification
+	ordered       []domain.Notification
+}
+
+func (r *testNotificationRepo) Create(_ context.Context, notification domain.Notification) (domain.Notification, error) {
+	if r.notifications == nil {
+		r.notifications = map[string]domain.Notification{}
+	}
+	for _, existing := range r.ordered {
+		if existing.UserID == notification.UserID && existing.Type == notification.Type && existing.EventID == notification.EventID {
+			return domain.Notification{}, domain.ErrConflict
+		}
+	}
+	r.notifications[notification.ID] = notification
+	r.ordered = append(r.ordered, notification)
+	return notification, nil
+}
+
+func (r *testNotificationRepo) ListByUserID(_ context.Context, userID string) ([]domain.Notification, error) {
+	result := make([]domain.Notification, 0)
+	for idx := len(r.ordered) - 1; idx >= 0; idx-- {
+		notification := r.ordered[idx]
+		if notification.UserID == userID {
+			result = append(result, r.notifications[notification.ID])
+		}
+	}
+	return result, nil
+}
+
+func (r *testNotificationRepo) MarkRead(_ context.Context, notificationID, userID string, readAt time.Time) (domain.Notification, error) {
+	notification, ok := r.notifications[notificationID]
+	if !ok || notification.UserID != userID {
+		return domain.Notification{}, domain.ErrNotFound
+	}
+	if notification.ReadAt == nil {
+		notification.ReadAt = &readAt
+		r.notifications[notificationID] = notification
+		for idx := range r.ordered {
+			if r.ordered[idx].ID == notificationID {
+				r.ordered[idx] = notification
+				break
+			}
+		}
+	}
+	return notification, nil
+}
+
+func TestNotificationEndpoints(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tokenManager := appauth.NewTokenManager("super-secret-token", "note-app", 15*time.Minute)
+	memberships := &testMembershipRepo{memberships: map[string][]domain.WorkspaceMember{
+		"workspace-1": {
+			{ID: "member-1", WorkspaceID: "workspace-1", UserID: "user-1", Role: domain.RoleEditor},
+			{ID: "member-2", WorkspaceID: "workspace-1", UserID: "user-2", Role: domain.RoleViewer},
+		},
+	}}
+	users := &testUserRepo{byEmail: map[string]domain.User{}}
+	notifications := &testNotificationRepo{notifications: map[string]domain.Notification{}, ordered: []domain.Notification{
+		{ID: "notif-1", UserID: "user-1", WorkspaceID: "workspace-1", Type: domain.NotificationTypeComment, EventID: "comment-1", Message: "New comment", CreatedAt: time.Date(2026, 3, 8, 2, 0, 0, 0, time.UTC)},
+		{ID: "notif-2", UserID: "user-2", WorkspaceID: "workspace-1", Type: domain.NotificationTypeInvitation, EventID: "inv-1", Message: "Invitation", CreatedAt: time.Date(2026, 3, 8, 3, 0, 0, 0, time.UTC)},
+	}}
+	notifications.notifications["notif-1"] = notifications.ordered[0]
+	notifications.notifications["notif-2"] = notifications.ordered[1]
+
+	notificationService := application.NewNotificationService(notifications, users, memberships)
+	server := NewServer(logger, application.AuthService{}, application.WorkspaceService{}, application.FolderService{}, application.PageService{}, application.RevisionService{}, tokenManager, storage.NewLocal(t.TempDir())).WithNotificationService(notificationService)
+
+	userToken, _, err := tokenManager.GenerateAccessToken("user-1", "user1@example.com", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("GenerateAccessToken() error = %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/notifications", nil)
+	listReq.Header.Set("Authorization", "Bearer "+userToken)
+	listRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d body=%s", listRec.Code, listRec.Body.String())
+	}
+
+	var listed struct {
+		Data []domain.Notification `json:"data"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("unmarshal list notifications response: %v", err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].ID != "notif-1" {
+		t.Fatalf("unexpected listed notifications: %+v", listed.Data)
+	}
+
+	readReq := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/notif-1/read", nil)
+	readReq.Header.Set("Authorization", "Bearer "+userToken)
+	readRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(readRec, readReq)
+	if readRec.Code != http.StatusOK {
+		t.Fatalf("expected read status 200, got %d body=%s", readRec.Code, readRec.Body.String())
+	}
+
+	var readPayload struct {
+		Data domain.Notification `json:"data"`
+	}
+	if err := json.Unmarshal(readRec.Body.Bytes(), &readPayload); err != nil {
+		t.Fatalf("unmarshal mark read response: %v", err)
+	}
+	if readPayload.Data.ReadAt == nil {
+		t.Fatalf("expected read_at to be set")
+	}
+
+	missingReq := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/notif-2/read", nil)
+	missingReq.Header.Set("Authorization", "Bearer "+userToken)
+	missingRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("expected other-user notification read status 404, got %d body=%s", missingRec.Code, missingRec.Body.String())
 	}
 }
