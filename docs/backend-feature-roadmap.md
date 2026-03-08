@@ -1,0 +1,617 @@
+# Backend Feature Roadmap
+
+## Product Assumptions and Locked Decisions
+- Platform: web only
+- Authentication: email/password first, Google and Microsoft later
+- Product model: workspace-based
+- Draft model: mutable auto-saved draft
+- Version model: immutable manual revisions
+- Collaboration: async only in v1
+- Roles: `owner`, `editor`, `viewer`
+- External sharing: excluded from v1
+- Primary database: PostgreSQL
+- API style: REST with JSON
+- Service shape: Go modular monolith
+- Storage: abstraction with local disk adapter for development
+
+## Backend Architecture Summary
+- Language: `Go`
+- HTTP stack: `net/http` + `chi`
+- Configuration: environment-driven typed config loader
+- Logging: `slog`
+- Database access: `pgx` with explicit SQL repositories
+- Migrations: `golang-migrate`
+- Auth: `bcrypt` password hashing, JWT access tokens, rotated refresh tokens persisted in PostgreSQL
+- Validation: request DTO validation at transport boundary
+- Search: PostgreSQL full-text search
+- Module boundaries:
+  - `internal/domain`
+  - `internal/application`
+  - `internal/transport/http`
+  - `internal/repository/postgres`
+  - `internal/infrastructure/auth`
+  - `internal/infrastructure/storage`
+
+## Ordered Feature List
+
+### 1. Repository Governance Files
+- Feature name: Repository governance files
+- Purpose: establish the development contract before code implementation starts
+- Single use case: a contributor reads the repository rules and roadmap before implementing a feature
+- Dependencies: none
+- API endpoints: none
+- Request/response contract: none
+- Database changes: none
+- Business rules:
+  - `AGENTS.md` governs development behavior
+  - This roadmap defines feature order
+- Error cases: none
+- Tests: manual review of document completeness
+- Done criteria:
+  - `AGENTS.md` exists at repo root
+  - `docs/backend-feature-roadmap.md` exists and matches the locked decisions
+
+### 2. Project Foundation
+- Feature name: Project foundation
+- Purpose: create the executable backend skeleton
+- Single use case: a developer starts the server and receives a healthy HTTP response
+- Dependencies: feature 1
+- API endpoints:
+  - `GET /healthz`
+- Request/response contract:
+  - Response `200`: `{ "data": { "status": "ok" } }`
+- Database changes: none
+- Business rules:
+  - Server must support graceful shutdown
+  - Router wiring must be centralized
+  - Dependency graph must be explicit
+- Error cases:
+  - Invalid configuration prevents startup
+- Tests:
+  - Health handler test
+  - Config loader test
+- Done criteria:
+  - Go module initialized
+  - Server boots with typed configuration
+  - Health endpoint responds successfully
+
+### 3. Database and Migration Foundation
+- Feature name: Database and migration foundation
+- Purpose: establish persistence and repeatable schema evolution
+- Single use case: a developer applies migrations to a fresh PostgreSQL database
+- Dependencies: feature 2
+- API endpoints: none
+- Request/response contract: none
+- Database changes:
+  - migration tracking table
+  - initial auth and workspace tables
+- Business rules:
+  - all schema changes must be migration-driven
+  - database connectivity is validated at startup
+- Error cases:
+  - migration failure
+  - database unavailable
+- Tests:
+  - migration smoke test from empty database
+- Done criteria:
+  - migration runner exists
+  - local database configuration exists
+  - repositories can access PostgreSQL through shared connection management
+
+### 4. Error and Response Standardization
+- Feature name: Error and response standardization
+- Purpose: make API behavior predictable across handlers
+- Single use case: a client receives a consistent error payload for invalid requests
+- Dependencies: feature 2
+- API endpoints:
+  - applies to all current and future endpoints
+- Request/response contract:
+  - Success envelope: `{ "data": ... }`
+  - Error envelope: `{ "error": { "code": "...", "message": "...", "request_id": "..." } }`
+- Database changes: none
+- Business rules:
+  - every response includes request correlation support
+  - domain errors map to stable HTTP status codes
+- Error cases:
+  - malformed JSON
+  - validation errors
+  - authorization errors
+- Tests:
+  - middleware tests
+  - error mapping tests
+- Done criteria:
+  - request ID middleware present
+  - structured errors returned consistently
+  - JSON helpers used by all handlers
+
+### 5. User Registration
+- Feature name: User registration
+- Purpose: create user accounts safely
+- Single use case: a new user signs up with email and password
+- Dependencies: features 3 and 4
+- API endpoints:
+  - `POST /api/v1/auth/register`
+- Request/response contract:
+  - Request: `email`, `password`, `full_name`
+  - Response `201`: created user summary
+- Database changes:
+  - `users`
+- Business rules:
+  - email must be unique and normalized
+  - password must satisfy minimum complexity
+  - password hash must be stored instead of raw password
+- Error cases:
+  - duplicate email
+  - invalid email
+  - weak password
+- Tests:
+  - handler tests
+  - service tests for validation and duplicate rejection
+- Done criteria:
+  - registration endpoint works end-to-end
+  - password hashing verified in tests
+
+### 6. User Sign-in
+- Feature name: User sign-in
+- Purpose: issue authenticated credentials
+- Single use case: a user logs in and receives access and refresh tokens
+- Dependencies: feature 5
+- API endpoints:
+  - `POST /api/v1/auth/login`
+  - `GET /api/v1/auth/me`
+- Request/response contract:
+  - Login request: `email`, `password`
+  - Login response `200`: user summary, access token, refresh token, expiry metadata
+  - Current user response `200`: authenticated user summary
+- Database changes:
+  - `refresh_tokens`
+- Business rules:
+  - login requires valid email/password
+  - access token is short-lived JWT
+  - refresh token is persisted for rotation and revocation
+- Error cases:
+  - invalid credentials
+  - inactive or missing user
+- Tests:
+  - login handler tests
+  - token issuance tests
+  - authenticated current user test
+- Done criteria:
+  - login works end-to-end
+  - authenticated routes can resolve current user
+
+### 7. Token Refresh and Sign-out
+- Feature name: Token refresh and sign-out
+- Purpose: maintain secure sessions and revoke access cleanly
+- Single use case: a logged-in user refreshes credentials and later signs out
+- Dependencies: feature 6
+- API endpoints:
+  - `POST /api/v1/auth/refresh`
+  - `POST /api/v1/auth/logout`
+- Request/response contract:
+  - Refresh request: `refresh_token`
+  - Refresh response `200`: new access token and refresh token
+  - Logout request: `refresh_token`
+  - Logout response `204`
+- Database changes:
+  - refresh token lifecycle fields
+- Business rules:
+  - refresh rotation invalidates old refresh token
+  - logout revokes the supplied refresh token
+- Error cases:
+  - expired token
+  - revoked token
+  - invalid token
+- Tests:
+  - refresh rotation tests
+  - logout revocation tests
+- Done criteria:
+  - old refresh tokens can no longer be reused
+  - logout invalidates future refresh attempts
+
+### 8. Workspace Creation
+- Feature name: Workspace creation
+- Purpose: create a team-scoped collaboration boundary
+- Single use case: an authenticated user creates a workspace and becomes owner
+- Dependencies: features 6 and 4
+- API endpoints:
+  - `POST /api/v1/workspaces`
+- Request/response contract:
+  - Request: `name`
+  - Response `201`: workspace summary and owner membership
+- Database changes:
+  - `workspaces`
+  - `workspace_members`
+- Business rules:
+  - creator is inserted as `owner`
+  - workspace name cannot be empty
+- Error cases:
+  - unauthorized request
+  - invalid workspace name
+- Tests:
+  - handler tests
+  - service tests for owner membership creation
+- Done criteria:
+  - workspace creation persists workspace and owner membership atomically
+
+### 9. Workspace Member Invitation
+- Feature name: Workspace member invitation
+- Purpose: let owners invite teammates to a workspace
+- Single use case: a workspace owner invites another user by email
+- Dependencies: feature 8
+- API endpoints:
+  - `POST /api/v1/workspaces/{workspaceID}/invitations`
+  - `POST /api/v1/workspace-invitations/{invitationID}/accept`
+  - `GET /api/v1/workspaces/{workspaceID}/members`
+- Request/response contract:
+  - Invite request: `email`, `role`
+  - Invite response `201`: invitation summary
+  - Accept response `200`: membership summary
+  - Members response `200`: list of members
+- Database changes:
+  - `workspace_invitations`
+- Business rules:
+  - only owners may invite
+  - invitation email is normalized
+  - invitation acceptance requires authenticated user email to match invitation email
+- Error cases:
+  - invite by non-owner
+  - duplicate active invitation
+  - email mismatch on acceptance
+- Tests:
+  - owner authorization tests
+  - invitation acceptance tests
+  - list members test
+- Done criteria:
+  - owner can invite and invited user can accept
+  - member listing includes accepted users
+
+### 10. Workspace Role Assignment
+- Feature name: Workspace role assignment
+- Purpose: let owners manage workspace access levels
+- Single use case: an owner changes a member role from `editor` to `viewer`
+- Dependencies: feature 9
+- API endpoints:
+  - `PATCH /api/v1/workspaces/{workspaceID}/members/{memberID}/role`
+- Request/response contract:
+  - Request: `role`
+  - Response `200`: updated membership summary
+- Database changes: none beyond existing membership table
+- Business rules:
+  - only owners may change roles
+  - at least one owner must remain in the workspace
+  - valid roles are `owner`, `editor`, `viewer`
+- Error cases:
+  - invalid role
+  - non-owner attempting update
+  - attempt to remove last owner
+- Tests:
+  - authorization tests
+  - last-owner protection test
+- Done criteria:
+  - role updates work and invalid transitions are blocked
+
+### 11. Folder Creation
+- Feature name: Folder creation
+- Purpose: organize workspace content
+- Single use case: an editor creates a folder inside a workspace
+- Dependencies: feature 10
+- API endpoints:
+  - `POST /api/v1/workspaces/{workspaceID}/folders`
+  - `GET /api/v1/workspaces/{workspaceID}/folders`
+- Request/response contract:
+  - Request: `name`, optional `parent_id`
+  - Response `201`: folder summary
+- Database changes:
+  - `folders`
+- Business rules:
+  - viewers cannot create folders
+  - parent folder must belong to same workspace
+- Error cases:
+  - unauthorized mutation
+  - invalid parent folder
+- Tests:
+  - permission tests
+  - parent validation tests
+- Done criteria:
+  - folders can be created and listed
+
+### 12. Page Creation
+- Feature name: Page creation
+- Purpose: create a document within a workspace
+- Single use case: an editor creates a page in a folder
+- Dependencies: feature 11
+- API endpoints:
+  - `POST /api/v1/workspaces/{workspaceID}/pages`
+  - `GET /api/v1/pages/{pageID}`
+- Request/response contract:
+  - Request: `title`, optional `folder_id`
+  - Response `201`: page summary
+- Database changes:
+  - `pages`
+  - `page_drafts`
+- Business rules:
+  - page title cannot be empty
+  - initial page draft is created with empty structured content
+- Error cases:
+  - invalid title
+  - invalid folder
+  - unauthorized mutation
+- Tests:
+  - page creation tests
+  - draft bootstrap tests
+- Done criteria:
+  - page and draft are created atomically
+
+### 13. Page Rename and Move
+- Feature name: Page rename and move
+- Purpose: maintain document organization over time
+- Single use case: an editor renames a page and moves it to another folder
+- Dependencies: feature 12
+- API endpoints:
+  - `PATCH /api/v1/pages/{pageID}`
+- Request/response contract:
+  - Request: `title`, `folder_id`
+  - Response `200`: updated page summary
+- Database changes: none beyond existing page tables
+- Business rules:
+  - viewers cannot rename or move pages
+  - target folder must belong to same workspace
+- Error cases:
+  - invalid folder
+  - unauthorized mutation
+- Tests:
+  - permission tests
+  - move validation tests
+- Done criteria:
+  - page metadata updates persist correctly
+
+### 14. Draft Persistence
+- Feature name: Draft persistence
+- Purpose: preserve the latest mutable document state
+- Single use case: an editor updates a page draft and later resumes editing
+- Dependencies: feature 12
+- API endpoints:
+  - `PUT /api/v1/pages/{pageID}/draft`
+- Request/response contract:
+  - Request: structured document content
+  - Response `200`: updated draft summary
+- Database changes:
+  - `page_drafts` content and metadata fields
+- Business rules:
+  - current draft is overwritten on each save
+  - draft update does not create a revision
+- Error cases:
+  - invalid structured content
+  - unauthorized mutation
+- Tests:
+  - draft update tests
+  - persistence tests
+- Done criteria:
+  - latest draft can be fetched and updated reliably
+
+### 15. Structured Content Validation
+- Feature name: Structured content validation
+- Purpose: enforce a stable document model
+- Single use case: a client submits a valid page document and it is accepted
+- Dependencies: feature 14
+- API endpoints:
+  - applies to draft and revision content endpoints
+- Request/response contract:
+  - structured JSON blocks and marks for v1 types
+- Database changes: none
+- Business rules:
+  - allowed blocks: paragraph, heading, bullet list, numbered list, task list, quote, code block, table, image
+  - allowed marks: bold, italic, inline code, link
+- Error cases:
+  - unknown block type
+  - invalid nesting
+  - malformed image or link metadata
+- Tests:
+  - validation table tests
+- Done criteria:
+  - invalid content is rejected before persistence
+
+### 16. Manual Revision Save
+- Feature name: Manual revision save
+- Purpose: create immutable checkpoints from current draft
+- Single use case: an editor saves a revision before a major edit
+- Dependencies: features 14 and 15
+- API endpoints:
+  - `POST /api/v1/pages/{pageID}/revisions`
+- Request/response contract:
+  - Request: optional `label`, optional `note`
+  - Response `201`: revision summary
+- Database changes:
+  - `revisions`
+- Business rules:
+  - revision content is copied from current draft
+  - revision is immutable after creation
+- Error cases:
+  - unauthorized mutation
+  - page not found
+- Tests:
+  - revision creation tests
+  - immutability tests
+- Done criteria:
+  - explicit revision save persists a historical checkpoint
+
+### 17. Revision History Listing
+- Feature name: Revision history listing
+- Purpose: expose saved checkpoints
+- Single use case: a user opens the revision history for a page
+- Dependencies: feature 16
+- API endpoints:
+  - `GET /api/v1/pages/{pageID}/revisions`
+- Request/response contract:
+  - Response `200`: ordered list of revision metadata
+- Database changes: none
+- Business rules:
+  - history is chronological and scoped to one page
+- Error cases:
+  - page not found
+  - unauthorized access
+- Tests:
+  - list ordering tests
+- Done criteria:
+  - page history is retrievable through the API
+
+### 18. Two-Version Diff
+- Feature name: Two-version diff
+- Purpose: explain changes between two saved revisions
+- Single use case: a user compares revision A and revision B for the same page
+- Dependencies: feature 17
+- API endpoints:
+  - `GET /api/v1/pages/{pageID}/revisions/compare?from={id}&to={id}`
+- Request/response contract:
+  - Response `200`: block and inline diff payload
+- Database changes: none
+- Business rules:
+  - both revisions must belong to the same page
+  - diff includes block additions, removals, and text edits
+- Error cases:
+  - invalid comparison pair
+  - missing revisions
+- Tests:
+  - diff generation tests
+- Done criteria:
+  - comparison endpoint returns deterministic diff output
+
+### 19. Revision Restore
+- Feature name: Revision restore
+- Purpose: recover previous content without destroying history
+- Single use case: a user restores an older revision as the current page state
+- Dependencies: feature 18
+- API endpoints:
+  - `POST /api/v1/pages/{pageID}/revisions/{revisionID}/restore`
+- Request/response contract:
+  - Response `200`: restored draft and created revision summary
+- Database changes: none beyond existing revision and draft tables
+- Business rules:
+  - restore updates current draft
+  - restore action creates a new revision event instead of deleting history
+- Error cases:
+  - unauthorized mutation
+  - revision/page mismatch
+- Tests:
+  - restore history preservation tests
+- Done criteria:
+  - restored content becomes current draft and prior history remains intact
+
+### 20. Page Comments
+- Feature name: Page comments
+- Purpose: support page-level discussion
+- Single use case: a viewer comments on a page and an editor resolves it
+- Dependencies: feature 12
+- API endpoints:
+  - `POST /api/v1/pages/{pageID}/comments`
+  - `GET /api/v1/pages/{pageID}/comments`
+  - `POST /api/v1/comments/{commentID}/resolve`
+- Request/response contract:
+  - Create request: `body`
+  - Response `201`: comment summary
+  - List response `200`: list of comments
+  - Resolve response `200`: updated comment summary
+- Database changes:
+  - `page_comments`
+- Business rules:
+  - comments are page-level only
+  - viewers may create comments
+  - resolved comments retain history
+- Error cases:
+  - empty comment body
+  - page not found
+- Tests:
+  - create/list/resolve tests
+- Done criteria:
+  - comments can be created, viewed, and resolved
+
+### 21. Search
+- Feature name: Search
+- Purpose: find pages by title and content within a workspace
+- Single use case: a user searches for text and receives matching pages
+- Dependencies: feature 14
+- API endpoints:
+  - `GET /api/v1/workspaces/{workspaceID}/search?q=...`
+- Request/response contract:
+  - Response `200`: list of matching pages
+- Database changes:
+  - search indexes or generated tsvector support
+- Business rules:
+  - search scope is one workspace
+  - both title and body content are searchable
+- Error cases:
+  - missing query text
+- Tests:
+  - title search test
+  - body search test
+- Done criteria:
+  - search returns relevant results from one workspace
+
+### 22. Trash Delete and Restore
+- Feature name: Trash delete and restore
+- Purpose: recover deleted pages safely
+- Single use case: an editor deletes a page and later restores it from trash
+- Dependencies: feature 12
+- API endpoints:
+  - `DELETE /api/v1/pages/{pageID}`
+  - `GET /api/v1/workspaces/{workspaceID}/trash`
+  - `POST /api/v1/trash/{trashItemID}/restore`
+- Request/response contract:
+  - Delete response `204`
+  - Trash list response `200`
+  - Restore response `200`: restored page summary
+- Database changes:
+  - trash fields or dedicated trash table
+- Business rules:
+  - delete is soft delete
+  - restore keeps revision history intact
+- Error cases:
+  - page not found
+  - unauthorized mutation
+- Tests:
+  - soft delete tests
+  - restore history preservation tests
+- Done criteria:
+  - deleted pages can be listed and restored
+
+### 23. In-App Notifications
+- Feature name: In-app notifications
+- Purpose: surface relevant workspace activity
+- Single use case: a user sees notifications for invitations and comments
+- Dependencies: features 9 and 20
+- API endpoints:
+  - `GET /api/v1/notifications`
+  - `POST /api/v1/notifications/{notificationID}/read`
+- Request/response contract:
+  - List response `200`: notification list
+  - Mark-read response `200`: updated notification
+- Database changes:
+  - `notifications`
+- Business rules:
+  - notifications are scoped to one user
+  - invitation and comment events create unread notifications
+- Error cases:
+  - notification not found
+  - unauthorized access
+- Tests:
+  - notification creation tests
+  - mark read tests
+- Done criteria:
+  - users can view and mark notifications as read
+
+## Test Expectations
+- Handler/API tests for success and failure cases
+- Application-layer tests for business rules
+- Repository tests for SQL-backed persistence where logic is non-trivial
+- Migration test that validates schema can be applied from empty database
+- Auth tests for password hashing, token refresh rotation, and authorization failures
+- Revision tests that prove restore does not destroy history
+- Search tests that confirm title and body search both work
+- Permission tests that confirm viewer cannot mutate content and only owner can manage roles
+
+## End-to-End Milestones
+- Register -> login -> create workspace -> invite member -> accept invite -> assign viewer
+- Create folder -> create page -> update draft -> save revision -> edit draft -> save second revision -> compare -> restore
+- Add comment -> resolve comment -> verify notification creation
+- Delete page to trash -> restore page -> verify revisions remain intact

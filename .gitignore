@@ -1,0 +1,6 @@
+.idea/
+.env
+bin/
+dist/
+tmp/
+coverage.out
