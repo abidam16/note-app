@@ -88,6 +88,7 @@ func (s Server) Handler() nethttp.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(appmiddleware.Authenticate(s.tokenManager))
+			r.Get("/workspaces", s.handleListWorkspaces())
 			r.Post("/workspaces", s.handleCreateWorkspace())
 			r.Post("/workspaces/{workspaceID}/invitations", s.handleInviteMember())
 			r.Get("/workspaces/{workspaceID}/members", s.handleListMembers())
@@ -148,4 +149,33 @@ func mapError(err error) (int, APIError) {
 	default:
 		return nethttp.StatusInternalServerError, NewAPIError("internal_error", "internal server error")
 	}
+}
+
+func (s Server) writeMappedError(w nethttp.ResponseWriter, r *nethttp.Request, err error) {
+	status, apiErr := mapError(err)
+
+	routePattern := ""
+	if routeCtx := chi.RouteContext(r.Context()); routeCtx != nil {
+		routePattern = routeCtx.RoutePattern()
+	}
+
+	attrs := []any{
+		slog.String("request_id", chimiddleware.GetReqID(r.Context())),
+		slog.String("method", r.Method),
+		slog.String("path", r.URL.Path),
+		slog.String("route", routePattern),
+		slog.String("query", r.URL.RawQuery),
+		slog.String("remote_addr", r.RemoteAddr),
+		slog.String("user_id", requestContextUserID(r.Context())),
+		slog.Int("status", status),
+		slog.String("error_code", apiErr.Code),
+		slog.String("error", err.Error()),
+	}
+	if status >= nethttp.StatusInternalServerError {
+		s.logger.Error("request failed", attrs...)
+	} else {
+		s.logger.Warn("request failed", attrs...)
+	}
+
+	WriteError(w, r, status, apiErr)
 }

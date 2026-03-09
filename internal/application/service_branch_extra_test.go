@@ -38,7 +38,9 @@ func TestWorkspaceServiceInviteErrorBranches(t *testing.T) {
 		getActiveInvitationByEmailFn: func(context.Context, string, string) (domain.WorkspaceInvitation, error) {
 			return domain.WorkspaceInvitation{}, errors.New("active invitation query failed")
 		},
-	}, authUserRepoStub{})
+	}, authUserRepoStub{getByEmailFn: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: "u2", Email: "a@example.com"}, nil
+	}})
 
 	if _, err := svc.InviteMember(context.Background(), "u1", InviteMemberInput{WorkspaceID: "w1", Email: "a@example.com", Role: domain.RoleViewer}); err == nil || err.Error() != "active invitation query failed" {
 		t.Fatalf("expected active invitation query error, got %v", err)
@@ -54,7 +56,9 @@ func TestWorkspaceServiceInviteErrorBranches(t *testing.T) {
 		createInvitationFn: func(_ context.Context, inv domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error) {
 			return inv, nil
 		},
-	}, authUserRepoStub{}, failingNotificationPublisher{err: notifErr})
+	}, authUserRepoStub{getByEmailFn: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: "u2", Email: "a@example.com"}, nil
+	}}, failingNotificationPublisher{err: notifErr})
 
 	if _, err := svc.InviteMember(context.Background(), "u1", InviteMemberInput{WorkspaceID: "w1", Email: "a@example.com", Role: domain.RoleViewer}); err == nil || err.Error() != notifErr.Error() {
 		t.Fatalf("expected invitation notification error, got %v", err)

@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func testDSN() string {
@@ -147,5 +150,73 @@ func TestRunMigrationsUpDirtyDatabaseError(t *testing.T) {
 
 	if err := RunMigrations(dsn, "migrations", "up", 0); err == nil || !strings.Contains(err.Error(), "apply up migrations") {
 		t.Fatalf("expected up apply error on dirty database, got %v", err)
+	}
+}
+
+func TestIsPoolerDSN(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want bool
+	}{
+		{
+			name: "supabase pooler host",
+			dsn:  "postgresql://user:pass@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres",
+			want: true,
+		},
+		{
+			name: "pgbouncer host",
+			dsn:  "postgres://user:pass@pgbouncer.internal:5432/noteapp",
+			want: true,
+		},
+		{
+			name: "pgbouncer query",
+			dsn:  "postgres://user:pass@localhost:5432/noteapp?pgbouncer=true",
+			want: true,
+		},
+		{
+			name: "pooler query",
+			dsn:  "postgres://user:pass@localhost:5432/noteapp?pooler=true",
+			want: true,
+		},
+		{
+			name: "regular postgres",
+			dsn:  "postgres://user:pass@localhost:5432/noteapp?sslmode=disable",
+			want: false,
+		},
+		{
+			name: "invalid dsn",
+			dsn:  "::bad-dsn",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isPoolerDSN(tt.dsn)
+			if got != tt.want {
+				t.Fatalf("isPoolerDSN(%q) = %v, want %v", tt.dsn, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyPoolerSafeQueryMode(t *testing.T) {
+	cfg, err := pgxpool.ParseConfig("postgres://user:pass@localhost:5432/noteapp?sslmode=disable")
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	applyPoolerSafeQueryMode(cfg, "postgres://user:pass@localhost:5432/noteapp?sslmode=disable")
+	if cfg.ConnConfig.DefaultQueryExecMode == pgx.QueryExecModeSimpleProtocol {
+		t.Fatal("did not expect simple protocol for regular postgres dsn")
+	}
+
+	cfgPooler, err := pgxpool.ParseConfig("postgresql://user:pass@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres")
+	if err != nil {
+		t.Fatalf("parse pooler config: %v", err)
+	}
+	applyPoolerSafeQueryMode(cfgPooler, "postgresql://user:pass@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres")
+	if cfgPooler.ConnConfig.DefaultQueryExecMode != pgx.QueryExecModeSimpleProtocol {
+		t.Fatal("expected simple protocol for pooler dsn")
 	}
 }

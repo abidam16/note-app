@@ -81,8 +81,7 @@ func (s Server) handleRegister() http.HandlerFunc {
 			FullName: req.FullName,
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -100,8 +99,7 @@ func (s Server) handleLogin() http.HandlerFunc {
 
 		result, err := s.authService.Login(r.Context(), application.LoginInput{Email: req.Email, Password: req.Password})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -119,8 +117,7 @@ func (s Server) handleRefresh() http.HandlerFunc {
 
 		result, err := s.authService.Refresh(r.Context(), req.RefreshToken)
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -137,8 +134,7 @@ func (s Server) handleLogout() http.HandlerFunc {
 		}
 
 		if err := s.authService.Logout(r.Context(), req.RefreshToken); err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -150,8 +146,7 @@ func (s Server) handleCurrentUser() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, err := s.authService.CurrentUser(r.Context(), requestContextUserID(r.Context()))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -169,12 +164,22 @@ func (s Server) handleCreateWorkspace() http.HandlerFunc {
 
 		workspace, member, err := s.workspaceService.CreateWorkspace(r.Context(), requestContextUserID(r.Context()), application.CreateWorkspaceInput{Name: req.Name})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
 		WriteJSON(w, http.StatusCreated, map[string]any{"workspace": workspace, "membership": member})
+	}
+}
+
+func (s Server) handleListWorkspaces() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		workspaces, err := s.workspaceService.ListWorkspaces(r.Context(), requestContextUserID(r.Context()))
+		if err != nil {
+			s.writeMappedError(w, r, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, workspaces)
 	}
 }
 
@@ -192,8 +197,7 @@ func (s Server) handleInviteMember() http.HandlerFunc {
 			Role:        domain.WorkspaceRole(req.Role),
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -205,8 +209,7 @@ func (s Server) handleAcceptInvitation() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		member, err := s.workspaceService.AcceptInvitation(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "invitationID"))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -218,8 +221,7 @@ func (s Server) handleListMembers() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		members, err := s.workspaceService.ListMembers(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "workspaceID"))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -241,8 +243,7 @@ func (s Server) handleUpdateMemberRole() http.HandlerFunc {
 			Role:        domain.WorkspaceRole(req.Role),
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -272,8 +273,7 @@ func (s Server) handleCreateFolder() http.HandlerFunc {
 			ParentID:    req.ParentID,
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -285,8 +285,7 @@ func (s Server) handleListFolders() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		folders, err := s.folderService.ListFolders(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "workspaceID"))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -316,8 +315,7 @@ func (s Server) handleCreatePage() http.HandlerFunc {
 			Title:       req.Title,
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -329,8 +327,7 @@ func (s Server) handleGetPage() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page, draft, err := s.pageService.GetPage(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "pageID"))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -371,8 +368,7 @@ func (s Server) handleUpdatePage() http.HandlerFunc {
 			FolderSet: folderSet,
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -393,8 +389,7 @@ func (s Server) handleUpdateDraft() http.HandlerFunc {
 			Content: req.Content,
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -416,8 +411,7 @@ func (s Server) handleCreateRevision() http.HandlerFunc {
 			Note:   req.Note,
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -436,8 +430,7 @@ func (s Server) handleListRevisions() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		revisions, err := s.revisionService.ListRevisions(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "pageID"))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -453,8 +446,7 @@ func (s Server) handleCompareRevisions() http.HandlerFunc {
 			ToRevisionID:   r.URL.Query().Get("to"),
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -469,8 +461,7 @@ func (s Server) handleRestoreRevision() http.HandlerFunc {
 			RevisionID: chi.URLParam(r, "revisionID"),
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -500,8 +491,7 @@ func (s Server) handleCreateComment() http.HandlerFunc {
 			Body:   req.Body,
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -513,8 +503,7 @@ func (s Server) handleListComments() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		comments, err := s.commentService.ListComments(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "pageID"))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -528,8 +517,7 @@ func (s Server) handleResolveComment() http.HandlerFunc {
 			CommentID: chi.URLParam(r, "commentID"),
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -543,8 +531,7 @@ func (s Server) handleSearchPages() http.HandlerFunc {
 			Query:       r.URL.Query().Get("q"),
 		})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -556,8 +543,7 @@ func (s Server) handleDeletePage() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := s.pageService.DeletePage(r.Context(), requestContextUserID(r.Context()), application.DeletePageInput{PageID: chi.URLParam(r, "pageID")})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -569,8 +555,7 @@ func (s Server) handleListTrash() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		items, err := s.pageService.ListTrash(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "workspaceID"))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -582,8 +567,7 @@ func (s Server) handleRestoreTrashItem() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page, err := s.pageService.RestoreTrashItem(r.Context(), requestContextUserID(r.Context()), application.RestoreTrashItemInput{TrashItemID: chi.URLParam(r, "trashItemID")})
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -595,8 +579,7 @@ func (s Server) handleListNotifications() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		notifications, err := s.notificationService.ListNotifications(r.Context(), requestContextUserID(r.Context()))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 
@@ -608,8 +591,7 @@ func (s Server) handleMarkNotificationRead() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		notification, err := s.notificationService.MarkNotificationRead(r.Context(), requestContextUserID(r.Context()), chi.URLParam(r, "notificationID"))
 		if err != nil {
-			status, apiErr := mapError(err)
-			WriteError(w, r, status, apiErr)
+			s.writeMappedError(w, r, err)
 			return
 		}
 

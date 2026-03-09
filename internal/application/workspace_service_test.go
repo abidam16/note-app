@@ -21,6 +21,19 @@ func (r *fakeWorkspaceRepo) CreateWithOwner(_ context.Context, workspace domain.
 	return workspace, member, nil
 }
 
+func (r *fakeWorkspaceRepo) ListByUserID(_ context.Context, userID string) ([]domain.Workspace, error) {
+	workspaces := make([]domain.Workspace, 0)
+	for workspaceID, members := range r.memberships {
+		for _, member := range members {
+			if member.UserID == userID {
+				workspaces = append(workspaces, domain.Workspace{ID: workspaceID})
+				break
+			}
+		}
+	}
+	return workspaces, nil
+}
+
 func (r *fakeWorkspaceRepo) GetMembershipByUserID(_ context.Context, workspaceID, userID string) (domain.WorkspaceMember, error) {
 	for _, member := range r.memberships[workspaceID] {
 		if member.UserID == userID {

@@ -10,43 +10,24 @@ Current next strict roadmap feature:
 - None (backend roadmap complete through feature 23)
 
 What was completed in this session:
-- Added notification schema migration:
-  - `migrations/000008_notifications.up.sql`
-  - `migrations/000008_notifications.down.sql`
-- Added notification domain model:
-  - `internal/domain/notification.go`
-- Added PostgreSQL notification repository:
-  - `internal/repository/postgres/notification_repository.go`
-- Added notification application service and event publisher contract:
-  - `internal/application/notification_service.go`
-  - `internal/application/notification_events.go`
-- Integrated notification publishing into existing flows:
-  - Invitation events via `internal/application/workspace_service.go`
-  - Comment events via `internal/application/comment_service.go`
-- Added notification transport wiring and handlers:
-  - `internal/transport/http/server.go`
-  - `internal/transport/http/handlers.go`
-- Wired dependencies in startup:
-  - `cmd/api/main.go`
+- Added authenticated workspace listing endpoint:
+  - `GET /api/v1/workspaces`
+- Added application method and repository query:
+  - `WorkspaceService.ListWorkspaces`
+  - `WorkspaceRepository.ListByUserID`
+- Enforced user-scoped workspace visibility:
+  - endpoint returns only workspaces where `workspace_members.user_id = actor_id`
+- Enforced invitation registration rule:
+  - `POST /api/v1/workspaces/{workspaceID}/invitations` now rejects unregistered emails (`422 validation_failed`)
 - Added/updated tests:
-  - `internal/application/notification_service_test.go`
-  - `internal/application/notification_events_test.go`
-  - `internal/transport/http/server_test.go`
+  - `internal/application/workspace_service_additional_test.go`
+  - `internal/transport/http/server_auth_workspace_test.go`
+  - `internal/repository/postgres/user_workspace_refresh_repository_test.go`
 
-Implemented endpoints now include:
-- `GET /api/v1/notifications`
-- `POST /api/v1/notifications/{notificationID}/read`
-
-Implemented notification behavior:
-- Notifications are scoped to one user (`user_id`)
-- Invitation events create unread notifications for invited users when the invited email exists in `users`
-- Comment events create unread notifications for workspace members except the comment author
-- Duplicate event notifications are prevented by unique key `(user_id, type, event_id)`
-- Mark-read is idempotent via `read_at = COALESCE(read_at, now)`
-
-Verification completed for feature 23:
-- `go test ./...` passed
-- Note: in this environment, tests required network-enabled module download before passing
+Verification completed in this session:
+- `go test ./internal/application ./internal/transport/http` passed
+- `go test ./internal/repository/postgres -run TestDoesNotExist` passed (compile-only check)
+- Full repository integration test execution still depends on local PostgreSQL availability
 
 Local runtime state after verification:
 - API server status: not started by this session
@@ -62,7 +43,7 @@ Backend status:
 - No additional strict backend feature remains in `docs/backend-feature-roadmap.md`
 
 ## Exact Next Step
-- Wait for user direction for post-roadmap work (for example: hardening, integration checks, frontend start, or new scoped feature additions)
+- Frontend can call `GET /api/v1/workspaces` after login to load persisted workspace list for the current user.
 
 ## Resume Prompt
 If resuming in a new session, use this instruction:

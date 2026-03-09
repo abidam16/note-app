@@ -8,6 +8,8 @@ import (
 	"time"
 
 	appauth "note-app/internal/infrastructure/auth"
+
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 )
 
 type contextKey string
@@ -46,11 +48,25 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 			startedAt := time.Now()
 			wrapped := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(wrapped, r)
-			logger.Info("http request",
+
+			logMethod := logger.Info
+			if wrapped.status >= http.StatusInternalServerError {
+				logMethod = logger.Error
+			} else if wrapped.status >= http.StatusBadRequest {
+				logMethod = logger.Warn
+			}
+
+			logMethod("http request",
+				slog.String("request_id", chimiddleware.GetReqID(r.Context())),
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
+				slog.String("query", r.URL.RawQuery),
 				slog.Int("status", wrapped.status),
 				slog.Duration("duration", time.Since(startedAt)),
+				slog.Int("bytes_written", wrapped.bytesWritten),
+				slog.String("remote_addr", r.RemoteAddr),
+				slog.String("user_agent", r.UserAgent()),
+				slog.String("referer", r.Referer()),
 			)
 		})
 	}
@@ -58,10 +74,17 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status       int
+	bytesWritten int
 }
 
 func (r *statusRecorder) WriteHeader(statusCode int) {
 	r.status = statusCode
 	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	n, err := r.ResponseWriter.Write(p)
+	r.bytesWritten += n
+	return n, err
 }

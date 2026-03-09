@@ -11,6 +11,7 @@ import (
 
 type workspaceRepoStub struct {
 	createWithOwnerFn            func(context.Context, domain.Workspace, domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error)
+	listByUserIDFn               func(context.Context, string) ([]domain.Workspace, error)
 	getMembershipByUserIDFn      func(context.Context, string, string) (domain.WorkspaceMember, error)
 	createInvitationFn           func(context.Context, domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error)
 	getActiveInvitationByEmailFn func(context.Context, string, string) (domain.WorkspaceInvitation, error)
@@ -26,6 +27,12 @@ func (s workspaceRepoStub) CreateWithOwner(ctx context.Context, w domain.Workspa
 		return s.createWithOwnerFn(ctx, w, m)
 	}
 	return w, m, nil
+}
+func (s workspaceRepoStub) ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error) {
+	if s.listByUserIDFn != nil {
+		return s.listByUserIDFn(ctx, userID)
+	}
+	return []domain.Workspace{}, nil
 }
 func (s workspaceRepoStub) GetMembershipByUserID(ctx context.Context, wid, uid string) (domain.WorkspaceMember, error) {
 	if s.getMembershipByUserIDFn != nil {
@@ -79,12 +86,39 @@ func (s workspaceRepoStub) CountOwners(ctx context.Context, workspaceID string) 
 func TestWorkspaceServiceAdditionalBranches(t *testing.T) {
 	users := authUserRepoStub{getByIDFn: func(context.Context, string) (domain.User, error) {
 		return domain.User{ID: "user-1", Email: "owner@example.com"}, nil
+	}, getByEmailFn: func(_ context.Context, email string) (domain.User, error) {
+		return domain.User{ID: "member-1", Email: email}, nil
 	}}
 
 	t.Run("create workspace validation", func(t *testing.T) {
 		svc := NewWorkspaceService(workspaceRepoStub{}, users)
 		if _, _, err := svc.CreateWorkspace(context.Background(), "user-1", CreateWorkspaceInput{Name: "   "}); !errors.Is(err, domain.ErrValidation) {
 			t.Fatalf("expected validation error, got %v", err)
+		}
+	})
+
+	t.Run("create workspace requires valid actor", func(t *testing.T) {
+		svc := NewWorkspaceService(workspaceRepoStub{}, authUserRepoStub{})
+		if _, _, err := svc.CreateWorkspace(context.Background(), "missing-user", CreateWorkspaceInput{Name: "Team"}); !errors.Is(err, domain.ErrUnauthorized) {
+			t.Fatalf("expected unauthorized for unknown actor, got %v", err)
+		}
+	})
+
+	t.Run("list workspaces only for actor", func(t *testing.T) {
+		svc := NewWorkspaceService(workspaceRepoStub{
+			listByUserIDFn: func(_ context.Context, userID string) ([]domain.Workspace, error) {
+				if userID != "user-1" {
+					t.Fatalf("expected list call for actor user-1, got %s", userID)
+				}
+				return []domain.Workspace{{ID: "w1", Name: "Engineering"}}, nil
+			},
+		}, users)
+		items, err := svc.ListWorkspaces(context.Background(), "user-1")
+		if err != nil {
+			t.Fatalf("expected list success, got %v", err)
+		}
+		if len(items) != 1 || items[0].ID != "w1" {
+			t.Fatalf("unexpected workspace list: %+v", items)
 		}
 	})
 
@@ -106,6 +140,13 @@ func TestWorkspaceServiceAdditionalBranches(t *testing.T) {
 		}}, users)
 		if _, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "bad-email", Role: domain.RoleViewer}); !errors.Is(err, domain.ErrValidation) {
 			t.Fatalf("expected invalid email validation, got %v", err)
+		}
+
+		svc = NewWorkspaceService(workspaceRepoStub{getMembershipByUserIDFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
+			return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+		}}, authUserRepoStub{})
+		if _, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "missing@example.com", Role: domain.RoleViewer}); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("expected unregistered invitee validation, got %v", err)
 		}
 
 		svc = NewWorkspaceService(workspaceRepoStub{

@@ -14,6 +14,7 @@ import (
 
 type WorkspaceRepository interface {
 	CreateWithOwner(ctx context.Context, workspace domain.Workspace, member domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error)
+	ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error)
 	GetMembershipByUserID(ctx context.Context, workspaceID, userID string) (domain.WorkspaceMember, error)
 	CreateInvitation(ctx context.Context, invitation domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error)
 	GetActiveInvitationByEmail(ctx context.Context, workspaceID, email string) (domain.WorkspaceInvitation, error)
@@ -59,6 +60,15 @@ func (s WorkspaceService) CreateWorkspace(ctx context.Context, actorID string, i
 	if name == "" {
 		return domain.Workspace{}, domain.WorkspaceMember{}, fmt.Errorf("%w: workspace name is required", domain.ErrValidation)
 	}
+	if strings.TrimSpace(actorID) == "" {
+		return domain.Workspace{}, domain.WorkspaceMember{}, domain.ErrUnauthorized
+	}
+	if _, err := s.users.GetByID(ctx, actorID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.Workspace{}, domain.WorkspaceMember{}, domain.ErrUnauthorized
+		}
+		return domain.Workspace{}, domain.WorkspaceMember{}, err
+	}
 
 	now := time.Now().UTC()
 	workspace := domain.Workspace{
@@ -78,6 +88,19 @@ func (s WorkspaceService) CreateWorkspace(ctx context.Context, actorID string, i
 	return s.workspaces.CreateWithOwner(ctx, workspace, member)
 }
 
+func (s WorkspaceService) ListWorkspaces(ctx context.Context, actorID string) ([]domain.Workspace, error) {
+	if strings.TrimSpace(actorID) == "" {
+		return nil, domain.ErrUnauthorized
+	}
+	if _, err := s.users.GetByID(ctx, actorID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, domain.ErrUnauthorized
+		}
+		return nil, err
+	}
+	return s.workspaces.ListByUserID(ctx, actorID)
+}
+
 func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, input InviteMemberInput) (domain.WorkspaceInvitation, error) {
 	if !domain.IsValidWorkspaceRole(input.Role) {
 		return domain.WorkspaceInvitation{}, fmt.Errorf("%w: invalid role", domain.ErrValidation)
@@ -94,6 +117,12 @@ func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, inpu
 	email, err := normalizeEmail(input.Email)
 	if err != nil {
 		return domain.WorkspaceInvitation{}, fmt.Errorf("%w: invalid email", domain.ErrValidation)
+	}
+	if _, err := s.users.GetByEmail(ctx, email); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.WorkspaceInvitation{}, fmt.Errorf("%w: invitee must be a registered user", domain.ErrValidation)
+		}
+		return domain.WorkspaceInvitation{}, err
 	}
 
 	_, err = s.workspaces.GetActiveInvitationByEmail(ctx, input.WorkspaceID, email)

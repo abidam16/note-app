@@ -45,7 +45,9 @@ func TestWorkspaceServiceCreateWorkspaceRepoError(t *testing.T) {
 	repoErr := errors.New("create workspace failed")
 	svc := NewWorkspaceService(workspaceRepoStub{createWithOwnerFn: func(context.Context, domain.Workspace, domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error) {
 		return domain.Workspace{}, domain.WorkspaceMember{}, repoErr
-	}}, authUserRepoStub{})
+	}}, authUserRepoStub{getByIDFn: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: "u1", Email: "owner@example.com"}, nil
+	}})
 
 	_, _, err := svc.CreateWorkspace(context.Background(), "u1", CreateWorkspaceInput{Name: "Team"})
 	if err == nil || err.Error() != repoErr.Error() {

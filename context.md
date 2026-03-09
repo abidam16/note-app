@@ -9,36 +9,21 @@ Latest completed roadmap feature:
 Current next strict roadmap feature:
 - None (backend roadmap features 1-23 are complete)
 
-What was completed in this session (feature 23):
-- Added notification domain model in `internal/domain/notification.go`
-- Added notification repository in `internal/repository/postgres/notification_repository.go`
-- Added notification application service in `internal/application/notification_service.go`
-- Added notification event publisher contract in `internal/application/notification_events.go`
-- Wired invitation and comment event publishing:
-  - `internal/application/workspace_service.go`
-  - `internal/application/comment_service.go`
-- Added notification HTTP endpoints:
-  - `GET /api/v1/notifications`
-  - `POST /api/v1/notifications/{notificationID}/read`
-- Wired notification service in `cmd/api/main.go` and `internal/transport/http/server.go`
-- Added migration:
-  - `migrations/000008_notifications.up.sql`
-  - `migrations/000008_notifications.down.sql`
-- Added tests:
-  - `internal/application/notification_service_test.go`
-  - `internal/application/notification_events_test.go`
-  - Notification endpoint coverage in `internal/transport/http/server_test.go`
-
-Notification semantics now implemented:
-- Notifications are user-scoped and stored in `notifications`
-- Invitation events create unread notifications for the invited user when the invited email already belongs to a registered user
-- Comment events create unread notifications for workspace members except the comment author
-- Notification creation is idempotent by `(user_id, type, event_id)`
-- Read action is idempotent and sets `read_at` once
+What was completed in this session (post-roadmap hardening):
+- Added `GET /api/v1/workspaces` endpoint to list workspaces for the authenticated user only
+- Added service method `WorkspaceService.ListWorkspaces`
+- Added repository method `WorkspaceRepository.ListByUserID` with SQL join on `workspace_members.user_id`
+- Kept workspace listing strictly user-scoped (no cross-user workspace leakage)
+- Updated invitation rule: only registered users can be invited by email (`POST /api/v1/workspaces/{workspaceID}/invitations`)
+- Added workspace-list coverage in:
+  - `internal/application/workspace_service_additional_test.go`
+  - `internal/transport/http/server_auth_workspace_test.go`
+  - `internal/repository/postgres/user_workspace_refresh_repository_test.go`
 
 Verification from this session:
-- `go test ./...` passed
-- Note: test run required network access to fetch Go modules in this environment
+- `go test ./internal/application ./internal/transport/http` passed
+- `go test ./internal/repository/postgres -run TestDoesNotExist` passed (compile check only)
+- Full integration tests still require local PostgreSQL availability
 
 Resume from here:
 - Do not repeat completed work through feature 23
@@ -72,6 +57,7 @@ Backend roadmap status:
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/workspaces`
 - `POST /api/v1/workspaces`
 - `POST /api/v1/workspaces/{workspaceID}/invitations`
 - `POST /api/v1/workspace-invitations/{invitationID}/accept`

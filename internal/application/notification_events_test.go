@@ -30,7 +30,10 @@ func TestWorkspaceServiceInvitePublishesNotificationEvent(t *testing.T) {
 		invitations: map[string]domain.WorkspaceInvitation{},
 		owners:      map[string]int{"workspace-1": 1},
 	}
-	users := &fakeUserRepo{byEmail: map[string]domain.User{}, byID: map[string]domain.User{"owner-1": {ID: "owner-1", Email: "owner@example.com", FullName: "Owner"}}}
+	users := &fakeUserRepo{
+		byEmail: map[string]domain.User{"invitee@example.com": {ID: "invitee-1", Email: "invitee@example.com", FullName: "Invitee"}},
+		byID:    map[string]domain.User{"owner-1": {ID: "owner-1", Email: "owner@example.com", FullName: "Owner"}},
+	}
 	publisher := &fakeNotificationPublisher{}
 	service := NewWorkspaceService(workspaces, users, publisher)
 

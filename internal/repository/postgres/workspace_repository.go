@@ -43,6 +43,37 @@ func (r WorkspaceRepository) CreateWithOwner(ctx context.Context, workspace doma
 	return workspace, member, nil
 }
 
+func (r WorkspaceRepository) ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error) {
+	query := `
+        SELECT w.id, w.name, w.created_at, w.updated_at
+        FROM workspaces w
+        JOIN workspace_members wm ON wm.workspace_id = w.id
+        WHERE wm.user_id = $1
+        ORDER BY w.updated_at DESC, w.created_at DESC
+    `
+
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("query workspaces by user: %w", err)
+	}
+	defer rows.Close()
+
+	workspaces := make([]domain.Workspace, 0)
+	for rows.Next() {
+		var workspace domain.Workspace
+		if err := rows.Scan(&workspace.ID, &workspace.Name, &workspace.CreatedAt, &workspace.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan workspace by user: %w", err)
+		}
+		workspaces = append(workspaces, workspace)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate workspaces by user: %w", err)
+	}
+
+	return workspaces, nil
+}
+
 func (r WorkspaceRepository) GetMembershipByUserID(ctx context.Context, workspaceID, userID string) (domain.WorkspaceMember, error) {
 	query := `
         SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.created_at,
