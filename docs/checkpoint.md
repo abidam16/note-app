@@ -19,6 +19,11 @@ What was completed in this session:
   - endpoint returns only workspaces where `workspace_members.user_id = actor_id`
 - Enforced invitation registration rule:
   - `POST /api/v1/workspaces/{workspaceID}/invitations` now rejects unregistered emails (`422 validation_failed`)
+- Enforced workspace-name uniqueness per authenticated user:
+  - `POST /api/v1/workspaces` now rejects duplicate name for the actor (`422 validation_failed`)
+  - duplicate check is trim-aware and case-insensitive
+- Added frontend-facing API contract update:
+  - `frontend-repo/API_CONTRACT.md`
 - Added/updated tests:
   - `internal/application/workspace_service_additional_test.go`
   - `internal/transport/http/server_auth_workspace_test.go`
@@ -27,6 +32,7 @@ What was completed in this session:
 Verification completed in this session:
 - `go test ./internal/application ./internal/transport/http` passed
 - `go test ./internal/repository/postgres -run TestDoesNotExist` passed (compile-only check)
+- `go test ./internal/application ./internal/repository/postgres ./internal/transport/http` passed
 - Full repository integration test execution still depends on local PostgreSQL availability
 
 Local runtime state after verification:

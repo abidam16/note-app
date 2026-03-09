@@ -19,11 +19,16 @@ What was completed in this session (post-roadmap hardening):
   - `internal/application/workspace_service_additional_test.go`
   - `internal/transport/http/server_auth_workspace_test.go`
   - `internal/repository/postgres/user_workspace_refresh_repository_test.go`
+- Enforced workspace creation name uniqueness for each authenticated user:
+  - `POST /api/v1/workspaces` now rejects duplicate name per actor (case-insensitive, trim-aware)
+  - duplicate workspace names now return `422 validation_failed`
+  - updated frontend contract note in `frontend-repo/API_CONTRACT.md`
 
 Verification from this session:
 - `go test ./internal/application ./internal/transport/http` passed
 - `go test ./internal/repository/postgres -run TestDoesNotExist` passed (compile check only)
 - Full integration tests still require local PostgreSQL availability
+- `go test ./internal/application ./internal/repository/postgres ./internal/transport/http` passed
 
 Resume from here:
 - Do not repeat completed work through feature 23

@@ -11,6 +11,7 @@ import (
 
 type workspaceRepoStub struct {
 	createWithOwnerFn            func(context.Context, domain.Workspace, domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error)
+	hasWorkspaceWithNameForUserFn func(context.Context, string, string) (bool, error)
 	listByUserIDFn               func(context.Context, string) ([]domain.Workspace, error)
 	getMembershipByUserIDFn      func(context.Context, string, string) (domain.WorkspaceMember, error)
 	createInvitationFn           func(context.Context, domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error)
@@ -27,6 +28,12 @@ func (s workspaceRepoStub) CreateWithOwner(ctx context.Context, w domain.Workspa
 		return s.createWithOwnerFn(ctx, w, m)
 	}
 	return w, m, nil
+}
+func (s workspaceRepoStub) HasWorkspaceWithNameForUser(ctx context.Context, userID, workspaceName string) (bool, error) {
+	if s.hasWorkspaceWithNameForUserFn != nil {
+		return s.hasWorkspaceWithNameForUserFn(ctx, userID, workspaceName)
+	}
+	return false, nil
 }
 func (s workspaceRepoStub) ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error) {
 	if s.listByUserIDFn != nil {
@@ -101,6 +108,18 @@ func TestWorkspaceServiceAdditionalBranches(t *testing.T) {
 		svc := NewWorkspaceService(workspaceRepoStub{}, authUserRepoStub{})
 		if _, _, err := svc.CreateWorkspace(context.Background(), "missing-user", CreateWorkspaceInput{Name: "Team"}); !errors.Is(err, domain.ErrUnauthorized) {
 			t.Fatalf("expected unauthorized for unknown actor, got %v", err)
+		}
+	})
+
+	t.Run("create workspace rejects duplicate name for actor", func(t *testing.T) {
+		svc := NewWorkspaceService(workspaceRepoStub{hasWorkspaceWithNameForUserFn: func(_ context.Context, userID, workspaceName string) (bool, error) {
+			if userID != "user-1" || workspaceName != "Team" {
+				t.Fatalf("unexpected duplicate check inputs userID=%s workspaceName=%s", userID, workspaceName)
+			}
+			return true, nil
+		}}, users)
+		if _, _, err := svc.CreateWorkspace(context.Background(), "user-1", CreateWorkspaceInput{Name: "Team"}); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("expected validation for duplicate workspace name, got %v", err)
 		}
 	})
 

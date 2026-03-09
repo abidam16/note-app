@@ -43,6 +43,25 @@ func (r WorkspaceRepository) CreateWithOwner(ctx context.Context, workspace doma
 	return workspace, member, nil
 }
 
+func (r WorkspaceRepository) HasWorkspaceWithNameForUser(ctx context.Context, userID, workspaceName string) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM workspaces w
+			JOIN workspace_members wm ON wm.workspace_id = w.id
+			WHERE wm.user_id = $1
+			  AND LOWER(TRIM(w.name)) = LOWER(TRIM($2))
+		)
+	`
+
+	var exists bool
+	if err := r.db.QueryRow(ctx, query, userID, workspaceName).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check workspace name existence for user: %w", err)
+	}
+
+	return exists, nil
+}
+
 func (r WorkspaceRepository) ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error) {
 	query := `
         SELECT w.id, w.name, w.created_at, w.updated_at
