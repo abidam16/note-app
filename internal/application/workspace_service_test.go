@@ -21,6 +21,10 @@ func (r *fakeWorkspaceRepo) CreateWithOwner(_ context.Context, workspace domain.
 	return workspace, member, nil
 }
 
+func (r *fakeWorkspaceRepo) HasWorkspaceWithNameForUser(_ context.Context, userID, workspaceName string) (bool, error) {
+	return false, nil
+}
+
 func (r *fakeWorkspaceRepo) ListByUserID(_ context.Context, userID string) ([]domain.Workspace, error) {
 	workspaces := make([]domain.Workspace, 0)
 	for workspaceID, members := range r.memberships {

@@ -14,6 +14,7 @@ import (
 
 type WorkspaceRepository interface {
 	CreateWithOwner(ctx context.Context, workspace domain.Workspace, member domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error)
+	HasWorkspaceWithNameForUser(ctx context.Context, userID, workspaceName string) (bool, error)
 	ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error)
 	GetMembershipByUserID(ctx context.Context, workspaceID, userID string) (domain.WorkspaceMember, error)
 	CreateInvitation(ctx context.Context, invitation domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error)
@@ -68,6 +69,14 @@ func (s WorkspaceService) CreateWorkspace(ctx context.Context, actorID string, i
 			return domain.Workspace{}, domain.WorkspaceMember{}, domain.ErrUnauthorized
 		}
 		return domain.Workspace{}, domain.WorkspaceMember{}, err
+	}
+
+	hasName, err := s.workspaces.HasWorkspaceWithNameForUser(ctx, actorID, name)
+	if err != nil {
+		return domain.Workspace{}, domain.WorkspaceMember{}, err
+	}
+	if hasName {
+		return domain.Workspace{}, domain.WorkspaceMember{}, fmt.Errorf("%w: workspace name already exists", domain.ErrValidation)
 	}
 
 	now := time.Now().UTC()
