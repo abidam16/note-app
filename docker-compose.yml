@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: note-app-postgres
+    environment:
+      POSTGRES_DB: noteapp
+      POSTGRES_USER: noteapp
+      POSTGRES_PASSWORD: noteapp
+    ports:
+      - "5432:5432"
+    volumes:
+      - note_app_pg15_data:/var/lib/postgresql/data
+volumes:
+  note_app_pg15_data:
