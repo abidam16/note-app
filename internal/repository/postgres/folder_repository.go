@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"note-app/internal/domain"
 
@@ -36,6 +37,9 @@ func (r FolderRepository) Create(ctx context.Context, folder domain.Folder) (dom
 		&created.CreatedAt,
 		&created.UpdatedAt,
 	); err != nil {
+		if isUniqueViolation(err) {
+			return domain.Folder{}, fmt.Errorf("%w: folder name already exists in this location", domain.ErrValidation)
+		}
 		return domain.Folder{}, fmt.Errorf("insert folder: %w", err)
 	}
 	created.ParentID = parentID
@@ -103,4 +107,55 @@ func (r FolderRepository) ListByWorkspaceID(ctx context.Context, workspaceID str
 	}
 
 	return folders, nil
+}
+
+func (r FolderRepository) HasSiblingWithName(ctx context.Context, workspaceID string, parentID *string, name string, excludeFolderID *string) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM folders
+			WHERE workspace_id = $1
+			  AND (($2::uuid IS NULL AND parent_id IS NULL) OR parent_id = $2::uuid)
+			  AND LOWER(TRIM(name)) = LOWER(TRIM($3))
+			  AND ($4::uuid IS NULL OR id <> $4::uuid)
+		)
+	`
+
+	var exists bool
+	if err := r.db.QueryRow(ctx, query, workspaceID, parentID, name, excludeFolderID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check sibling folder name existence: %w", err)
+	}
+
+	return exists, nil
+}
+
+func (r FolderRepository) UpdateName(ctx context.Context, folderID, name string, updatedAt time.Time) (domain.Folder, error) {
+	query := `
+		UPDATE folders
+		SET name = $2, updated_at = $3
+		WHERE id = $1
+		RETURNING id, workspace_id, parent_id, name, created_at, updated_at
+	`
+
+	var folder domain.Folder
+	var parentID *string
+	if err := r.db.QueryRow(ctx, query, folderID, name, updatedAt).Scan(
+		&folder.ID,
+		&folder.WorkspaceID,
+		&parentID,
+		&folder.Name,
+		&folder.CreatedAt,
+		&folder.UpdatedAt,
+	); err != nil {
+		if isUniqueViolation(err) {
+			return domain.Folder{}, fmt.Errorf("%w: folder name already exists in this location", domain.ErrValidation)
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Folder{}, domain.ErrNotFound
+		}
+		return domain.Folder{}, fmt.Errorf("update folder name: %w", err)
+	}
+	folder.ParentID = parentID
+
+	return folder, nil
 }

@@ -56,6 +56,37 @@ func TestRunParsesFlags(t *testing.T) {
 	}
 }
 
+func TestRunPreflight(t *testing.T) {
+	migrationCalled := false
+	preflightCalled := false
+	deps := migrateDeps{
+		loadConfig: func() (config.Config, error) {
+			return config.Config{PostgresDSN: "postgres://example"}, nil
+		},
+		runMigrations: func(string, string, string, int) error {
+			migrationCalled = true
+			return nil
+		},
+		runFolderSiblingUniquenessPreflight: func(dsn string) error {
+			preflightCalled = true
+			if dsn != "postgres://example" {
+				t.Fatalf("unexpected dsn: %s", dsn)
+			}
+			return nil
+		},
+	}
+
+	if err := run([]string{"-preflight", "folder-sibling-uniqueness"}, deps); err != nil {
+		t.Fatalf("run() preflight error = %v", err)
+	}
+	if !preflightCalled {
+		t.Fatal("expected preflight to be called")
+	}
+	if migrationCalled {
+		t.Fatal("did not expect migrations to run during preflight")
+	}
+}
+
 func TestRunFlagParseError(t *testing.T) {
 	deps := migrateDeps{
 		loadConfig: func() (config.Config, error) {
@@ -68,6 +99,24 @@ func TestRunFlagParseError(t *testing.T) {
 
 	if err := run([]string{"-steps", "abc"}, deps); err == nil {
 		t.Fatal("expected flag parse error")
+	}
+}
+
+func TestRunUnsupportedPreflightAndMissingDependency(t *testing.T) {
+	deps := migrateDeps{
+		loadConfig: func() (config.Config, error) {
+			return config.Config{PostgresDSN: "postgres://example"}, nil
+		},
+		runMigrations: func(string, string, string, int) error {
+			return nil
+		},
+	}
+
+	if err := run([]string{"-preflight", "unknown"}, deps); err == nil {
+		t.Fatal("expected unsupported preflight error")
+	}
+	if err := run([]string{"-preflight", "folder-sibling-uniqueness"}, deps); err == nil {
+		t.Fatal("expected missing preflight dependency error")
 	}
 }
 
@@ -97,11 +146,24 @@ func TestRunConfigAndMigrationErrors(t *testing.T) {
 	if err := run(nil, deps); !errors.Is(err, migErr) {
 		t.Fatalf("expected migration error, got %v", err)
 	}
+
+	preflightErr := errors.New("preflight failed")
+	deps = migrateDeps{
+		loadConfig: func() (config.Config, error) {
+			return config.Config{PostgresDSN: "postgres://example"}, nil
+		},
+		runFolderSiblingUniquenessPreflight: func(string) error {
+			return preflightErr
+		},
+	}
+	if err := run([]string{"-preflight", "folder-sibling-uniqueness"}, deps); !errors.Is(err, preflightErr) {
+		t.Fatalf("expected preflight error, got %v", err)
+	}
 }
 
 func TestDefaultMigrateDeps(t *testing.T) {
 	deps := defaultMigrateDeps()
-	if deps.loadConfig == nil || deps.runMigrations == nil {
+	if deps.loadConfig == nil || deps.runMigrations == nil || deps.runFolderSiblingUniquenessPreflight == nil {
 		t.Fatal("expected default migrate deps to be initialized")
 	}
 }

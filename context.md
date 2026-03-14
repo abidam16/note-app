@@ -6,29 +6,45 @@ This section supersedes older references below if they differ.
 Latest completed roadmap feature:
 - 23. In-app notifications
 
+Latest completed post-roadmap backend feature:
+- Workspace rename and folder rename
+- Folder sibling-name uniqueness enforced for both create and rename
+
 Current next strict roadmap feature:
 - None (backend roadmap features 1-23 are complete)
 
 What was completed in this session (post-roadmap hardening):
-- Added `GET /api/v1/workspaces` endpoint to list workspaces for the authenticated user only
-- Added service method `WorkspaceService.ListWorkspaces`
-- Added repository method `WorkspaceRepository.ListByUserID` with SQL join on `workspace_members.user_id`
-- Kept workspace listing strictly user-scoped (no cross-user workspace leakage)
-- Updated invitation rule: only registered users can be invited by email (`POST /api/v1/workspaces/{workspaceID}/invitations`)
-- Added workspace-list coverage in:
-  - `internal/application/workspace_service_additional_test.go`
-  - `internal/transport/http/server_auth_workspace_test.go`
-  - `internal/repository/postgres/user_workspace_refresh_repository_test.go`
-- Enforced workspace creation name uniqueness for each authenticated user:
-  - `POST /api/v1/workspaces` now rejects duplicate name per actor (case-insensitive, trim-aware)
-  - duplicate workspace names now return `422 validation_failed`
-  - updated frontend contract note in `frontend-repo/API_CONTRACT.md`
+- Added `PATCH /api/v1/workspaces/{workspaceID}` endpoint for owner-only workspace rename
+- Added `PATCH /api/v1/folders/{folderID}` endpoint for owner/editor folder rename
+- Added service methods:
+  - `WorkspaceService.RenameWorkspace`
+  - `FolderService.RenameFolder`
+- Added repository methods:
+  - `WorkspaceRepository.GetByID`
+  - `WorkspaceRepository.UpdateName`
+  - `FolderRepository.HasSiblingWithName`
+  - `FolderRepository.UpdateName`
+- Enforced folder sibling-name uniqueness for both create and rename:
+  - sibling scope is `(workspace_id, parent_id)`
+  - root folders are siblings of other root folders
+  - duplicate comparison is trim-aware and case-insensitive
+- Added migration:
+  - `000009_folder_sibling_uniqueness`
+- Added migration rollout guard:
+  - `go run ./cmd/migrate -preflight folder-sibling-uniqueness` reports duplicate sibling folder names before migration `000009`
+  - migration `000009` now fails with a clear preflight message if duplicates still exist
+- Updated frontend/backend documentation:
+  - `frontend-repo/API_CONTRACT.md`
+  - `frontend-repo/CONTEXT.md`
+  - `docs/checkpoint.md`
+  - `docs/backend-feature-roadmap.md`
 
 Verification from this session:
+- `go test ./cmd/migrate` passed
+- `go test ./internal/infrastructure/database -run TestFormatFolderSiblingUniquenessConflicts` passed
 - `go test ./internal/application ./internal/transport/http` passed
 - `go test ./internal/repository/postgres -run TestDoesNotExist` passed (compile check only)
-- Full integration tests still require local PostgreSQL availability
-- `go test ./internal/application ./internal/repository/postgres ./internal/transport/http` passed
+- `go test ./internal/repository/postgres` could not run because local PostgreSQL was unavailable on `localhost:5432`
 
 Resume from here:
 - Do not repeat completed work through feature 23
@@ -64,12 +80,14 @@ Backend roadmap status:
 - `GET /api/v1/auth/me`
 - `GET /api/v1/workspaces`
 - `POST /api/v1/workspaces`
+- `PATCH /api/v1/workspaces/{workspaceID}`
 - `POST /api/v1/workspaces/{workspaceID}/invitations`
 - `POST /api/v1/workspace-invitations/{invitationID}/accept`
 - `GET /api/v1/workspaces/{workspaceID}/members`
 - `PATCH /api/v1/workspaces/{workspaceID}/members/{memberID}/role`
 - `POST /api/v1/workspaces/{workspaceID}/folders`
 - `GET /api/v1/workspaces/{workspaceID}/folders`
+- `PATCH /api/v1/folders/{folderID}`
 - `POST /api/v1/workspaces/{workspaceID}/pages`
 - `GET /api/v1/pages/{pageID}`
 - `PATCH /api/v1/pages/{pageID}`
@@ -92,6 +110,7 @@ Backend roadmap status:
 - Docker Compose uses `postgres:15` for local compatibility on this machine
 - Typical local commands:
   - `docker compose up -d postgres`
+  - `go run ./cmd/migrate -preflight folder-sibling-uniqueness`
   - `go run ./cmd/migrate -direction up`
   - `go test ./...`
   - `go run ./cmd/api`

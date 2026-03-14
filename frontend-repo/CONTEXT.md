@@ -1,4 +1,4 @@
-# Frontend Product Context (for new frontend repository)
+ï»¿# Frontend Product Context (for new frontend repository)
 
 ## Purpose
 This file gives a new frontend agent complete product and backend-integration context so UI/UX can be implemented correctly without re-discovery.
@@ -14,6 +14,7 @@ Core value:
 ## Backend Maturity Update (post-refactor/enhancement)
 Latest backend status:
 - Backend roadmap is complete through feature 23.
+- Workspace and folder rename are implemented as post-roadmap backend extensions.
 - Search and notification flows were refactored/enhanced and are production-ready integration surfaces.
 - Test quality target/milestone to assume for this frontend handoff: coverage above 90%.
 
@@ -26,8 +27,10 @@ What this means for frontend:
 Implemented domains:
 - Auth (register/login/refresh/logout/me)
 - Workspace and memberships (`owner`, `editor`, `viewer`)
+- Workspace rename
 - Invitations and acceptance
 - Folders and pages
+- Folder rename
 - Draft autosave model
 - Manual revisions + history + compare + restore
 - Page comments (create/list/resolve)
@@ -42,7 +45,7 @@ Roles:
 - `viewer`
 
 UI behavior by role:
-- `owner`: all editor capabilities + member role management and invitations
+- `owner`: all editor capabilities + member role management, invitations, and workspace rename
 - `editor`: create/update folders/pages/drafts/revisions/comments resolve/delete/restore trash
 - `viewer`: read content, revisions, compare, search, trash list, create comments, list comments, read/mark notifications; cannot mutate folders/pages/drafts/revisions/trash/resolve comment
 
@@ -56,7 +59,7 @@ Important UX requirement:
 - Restore = draft becomes old content and a new revision event is created (history remains additive)
 
 Frontend implication:
-- Keep “Save revision” separate from autosave draft
+- Keep "Save revision" separate from autosave draft
 - Show revision timeline as metadata list
 - Compare view takes two revision IDs
 - Restore must confirm action and then refresh draft + history
@@ -110,6 +113,7 @@ Auth:
 
 Workspaces and members:
 - `POST /api/v1/workspaces`
+- `PATCH /api/v1/workspaces/{workspaceID}`
 - `POST /api/v1/workspaces/{workspaceID}/invitations`
 - `POST /api/v1/workspace-invitations/{invitationID}/accept`
 - `GET /api/v1/workspaces/{workspaceID}/members`
@@ -118,6 +122,7 @@ Workspaces and members:
 Folders:
 - `POST /api/v1/workspaces/{workspaceID}/folders`
 - `GET /api/v1/workspaces/{workspaceID}/folders`
+- `PATCH /api/v1/folders/{folderID}`
 
 Pages and draft:
 - `POST /api/v1/workspaces/{workspaceID}/pages`
@@ -163,6 +168,7 @@ Recommended frontend session design:
 Primary areas:
 - Authentication (register/login)
 - Workspace switcher and creation
+- Workspace settings/rename
 - Member/invitation management (owner)
 - Folder/page tree and page editor surface
 - Revision panel (save/list/compare/restore)
@@ -181,6 +187,7 @@ Primary areas:
 - Validation and authorization are strict server-side
 - Compare output is deterministic and stable for rendering
 - Search is workspace-scoped and deterministic in response shape
+- Folder create and rename enforce sibling-name uniqueness
 - Soft-delete preserves revision history
 - Resolved comments are historical records, not removed
 - Notifications preserve unread/read state in backend

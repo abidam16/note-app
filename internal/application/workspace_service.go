@@ -15,6 +15,8 @@ import (
 type WorkspaceRepository interface {
 	CreateWithOwner(ctx context.Context, workspace domain.Workspace, member domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error)
 	HasWorkspaceWithNameForUser(ctx context.Context, userID, workspaceName string) (bool, error)
+	GetByID(ctx context.Context, workspaceID string) (domain.Workspace, error)
+	UpdateName(ctx context.Context, workspaceID, name string, updatedAt time.Time) (domain.Workspace, error)
 	ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error)
 	GetMembershipByUserID(ctx context.Context, workspaceID, userID string) (domain.WorkspaceMember, error)
 	CreateInvitation(ctx context.Context, invitation domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error)
@@ -34,6 +36,11 @@ type InviteMemberInput struct {
 	WorkspaceID string
 	Email       string
 	Role        domain.WorkspaceRole
+}
+
+type RenameWorkspaceInput struct {
+	WorkspaceID string
+	Name        string
 }
 
 type UpdateMemberRoleInput struct {
@@ -108,6 +115,38 @@ func (s WorkspaceService) ListWorkspaces(ctx context.Context, actorID string) ([
 		return nil, err
 	}
 	return s.workspaces.ListByUserID(ctx, actorID)
+}
+
+func (s WorkspaceService) RenameWorkspace(ctx context.Context, actorID string, input RenameWorkspaceInput) (domain.Workspace, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return domain.Workspace{}, fmt.Errorf("%w: workspace name is required", domain.ErrValidation)
+	}
+
+	membership, err := s.workspaces.GetMembershipByUserID(ctx, input.WorkspaceID, actorID)
+	if err != nil {
+		return domain.Workspace{}, err
+	}
+	if membership.Role != domain.RoleOwner {
+		return domain.Workspace{}, domain.ErrForbidden
+	}
+
+	workspace, err := s.workspaces.GetByID(ctx, input.WorkspaceID)
+	if err != nil {
+		return domain.Workspace{}, err
+	}
+
+	if !equalNormalizedName(workspace.Name, name) {
+		hasName, err := s.workspaces.HasWorkspaceWithNameForUser(ctx, actorID, name)
+		if err != nil {
+			return domain.Workspace{}, err
+		}
+		if hasName {
+			return domain.Workspace{}, fmt.Errorf("%w: workspace name already exists", domain.ErrValidation)
+		}
+	}
+
+	return s.workspaces.UpdateName(ctx, input.WorkspaceID, name, time.Now().UTC())
 }
 
 func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, input InviteMemberInput) (domain.WorkspaceInvitation, error) {
@@ -226,4 +265,8 @@ func (s WorkspaceService) UpdateMemberRole(ctx context.Context, actorID string, 
 	}
 
 	return s.workspaces.UpdateMemberRole(ctx, input.WorkspaceID, input.MemberID, input.Role)
+}
+
+func equalNormalizedName(left, right string) bool {
+	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
 }

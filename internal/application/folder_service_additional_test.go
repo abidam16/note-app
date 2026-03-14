@@ -33,4 +33,12 @@ func TestFolderServiceAdditionalBranches(t *testing.T) {
 	if len(list) == 0 {
 		t.Fatal("expected at least one folder")
 	}
+
+	if _, err := svc.CreateFolder(context.Background(), "u1", CreateFolderInput{WorkspaceID: "w1", Name: " root "}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected duplicate root-folder validation, got %v", err)
+	}
+
+	if _, err := svc.RenameFolder(context.Background(), "u1", RenameFolderInput{FolderID: "missing", Name: "Child"}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected missing folder not found, got %v", err)
+	}
 }

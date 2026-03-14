@@ -4,36 +4,37 @@
 This section supersedes older references below if they differ.
 
 Current completed feature:
-- 23. In-app notifications
+- Post-roadmap extension: workspace and folder rename with folder sibling-name uniqueness
 
 Current next strict roadmap feature:
 - None (backend roadmap complete through feature 23)
 
 What was completed in this session:
-- Added authenticated workspace listing endpoint:
-  - `GET /api/v1/workspaces`
-- Added application method and repository query:
-  - `WorkspaceService.ListWorkspaces`
-  - `WorkspaceRepository.ListByUserID`
-- Enforced user-scoped workspace visibility:
-  - endpoint returns only workspaces where `workspace_members.user_id = actor_id`
-- Enforced invitation registration rule:
-  - `POST /api/v1/workspaces/{workspaceID}/invitations` now rejects unregistered emails (`422 validation_failed`)
-- Enforced workspace-name uniqueness per authenticated user:
-  - `POST /api/v1/workspaces` now rejects duplicate name for the actor (`422 validation_failed`)
-  - duplicate check is trim-aware and case-insensitive
-- Added frontend-facing API contract update:
+- Added workspace rename endpoint:
+  - `PATCH /api/v1/workspaces/{workspaceID}` (`owner` only)
+- Added folder rename endpoint:
+  - `PATCH /api/v1/folders/{folderID}` (`owner|editor`)
+- Added backend service/repository support for workspace and folder rename
+- Enforced folder sibling-name uniqueness for both folder creation and folder rename
+- Added migration:
+  - `migrations/000009_folder_sibling_uniqueness.up.sql`
+  - `migrations/000009_folder_sibling_uniqueness.down.sql`
+- Added preflight support for migration rollout:
+  - `go run ./cmd/migrate -preflight folder-sibling-uniqueness`
+  - migration `000009` now fails with a clear duplicate-data message if preflight is skipped
+- Updated docs/contracts:
   - `frontend-repo/API_CONTRACT.md`
-- Added/updated tests:
-  - `internal/application/workspace_service_additional_test.go`
-  - `internal/transport/http/server_auth_workspace_test.go`
-  - `internal/repository/postgres/user_workspace_refresh_repository_test.go`
+  - `frontend-repo/CONTEXT.md`
+  - `context.md`
+  - `docs/backend-feature-roadmap.md`
+- Added/updated tests across application, transport, and repository packages
 
 Verification completed in this session:
+- `go test ./cmd/migrate` passed
+- `go test ./internal/infrastructure/database -run TestFormatFolderSiblingUniquenessConflicts` passed
 - `go test ./internal/application ./internal/transport/http` passed
 - `go test ./internal/repository/postgres -run TestDoesNotExist` passed (compile-only check)
-- `go test ./internal/application ./internal/repository/postgres ./internal/transport/http` passed
-- Full repository integration test execution still depends on local PostgreSQL availability
+- `go test ./internal/repository/postgres` could not run because PostgreSQL was unavailable on `localhost:5432`
 
 Local runtime state after verification:
 - API server status: not started by this session
@@ -45,13 +46,16 @@ Completed roadmap features:
 
 Backend status:
 - Backend roadmap implementation complete
+- Post-roadmap rename extension implemented
 - No frontend work started
 - No additional strict backend feature remains in `docs/backend-feature-roadmap.md`
 
 ## Exact Next Step
-- Frontend can call `GET /api/v1/workspaces` after login to load persisted workspace list for the current user.
+- Frontend can add workspace rename and folder rename flows against:
+  - `PATCH /api/v1/workspaces/{workspaceID}`
+  - `PATCH /api/v1/folders/{folderID}`
 
 ## Resume Prompt
 If resuming in a new session, use this instruction:
 
-"Read `context.md`, `AGENTS.md`, and `docs/checkpoint.md` first. Continue from the current state without repeating completed work. Treat backend roadmap features as complete through feature 23 unless I explicitly add new scope." 
+"Read `context.md`, `AGENTS.md`, and `docs/checkpoint.md` first. Continue from the current state without repeating completed work. Treat backend roadmap features as complete through feature 23, and treat workspace/folder rename as already implemented post-roadmap scope unless I explicitly add new scope." 

@@ -642,3 +642,39 @@
   - every package currently below `90%` reaches `>90%`
   - `go test ./...` passes
   - `go test ./... -cover` confirms package coverage targets
+
+## Post-Roadmap Extensions
+
+### 25. Workspace and Folder Rename
+- Feature name: Workspace and folder rename
+- Purpose: allow non-destructive metadata updates for core content containers
+- Single use case: an authorized user renames a workspace or folder without changing ownership or hierarchy
+- Dependencies: features 8 and 11
+- API endpoints:
+  - `PATCH /api/v1/workspaces/{workspaceID}`
+  - `PATCH /api/v1/folders/{folderID}`
+- Request/response contract:
+  - Workspace rename request: `name`
+  - Folder rename request: `name`
+  - Response `200`: updated workspace or folder summary
+- Database changes:
+  - folder sibling-name uniqueness indexes
+- Business rules:
+  - only `owner` may rename a workspace
+  - only `owner|editor` may rename a folder
+  - folder names must be unique among siblings within the same `(workspace_id, parent_id)` scope
+  - duplicate comparisons are trim-aware and case-insensitive
+  - migration rollout must support a preflight check for existing duplicate sibling folder names before enforcing unique indexes
+- Error cases:
+  - unauthorized rename
+  - blank name
+  - duplicate workspace name for actor
+  - duplicate folder name among siblings
+- Tests:
+  - handler tests for success, validation, and authorization
+  - service tests for role checks and duplicate detection
+  - repository tests for rename persistence and folder uniqueness enforcement
+- Done criteria:
+  - workspace rename works end-to-end
+  - folder rename works end-to-end
+  - folder create/rename both enforce sibling-name uniqueness

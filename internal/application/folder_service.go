@@ -15,6 +15,8 @@ type FolderRepository interface {
 	Create(ctx context.Context, folder domain.Folder) (domain.Folder, error)
 	GetByID(ctx context.Context, folderID string) (domain.Folder, error)
 	ListByWorkspaceID(ctx context.Context, workspaceID string) ([]domain.Folder, error)
+	HasSiblingWithName(ctx context.Context, workspaceID string, parentID *string, name string, excludeFolderID *string) (bool, error)
+	UpdateName(ctx context.Context, folderID, name string, updatedAt time.Time) (domain.Folder, error)
 }
 
 type WorkspaceMembershipReader interface {
@@ -26,6 +28,11 @@ type CreateFolderInput struct {
 	WorkspaceID string
 	Name        string
 	ParentID    *string
+}
+
+type RenameFolderInput struct {
+	FolderID string
+	Name     string
 }
 
 type FolderService struct {
@@ -69,6 +76,14 @@ func (s FolderService) CreateFolder(ctx context.Context, actorID string, input C
 		}
 	}
 
+	exists, err := s.folders.HasSiblingWithName(ctx, input.WorkspaceID, parentID, name, nil)
+	if err != nil {
+		return domain.Folder{}, err
+	}
+	if exists {
+		return domain.Folder{}, fmt.Errorf("%w: folder name already exists in this location", domain.ErrValidation)
+	}
+
 	now := time.Now().UTC()
 	folder := domain.Folder{
 		ID:          uuid.NewString(),
@@ -88,4 +103,34 @@ func (s FolderService) ListFolders(ctx context.Context, actorID, workspaceID str
 	}
 
 	return s.folders.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (s FolderService) RenameFolder(ctx context.Context, actorID string, input RenameFolderInput) (domain.Folder, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return domain.Folder{}, fmt.Errorf("%w: folder name is required", domain.ErrValidation)
+	}
+
+	folder, err := s.folders.GetByID(ctx, input.FolderID)
+	if err != nil {
+		return domain.Folder{}, err
+	}
+
+	membership, err := s.memberships.GetMembershipByUserID(ctx, folder.WorkspaceID, actorID)
+	if err != nil {
+		return domain.Folder{}, err
+	}
+	if membership.Role == domain.RoleViewer {
+		return domain.Folder{}, domain.ErrForbidden
+	}
+
+	exists, err := s.folders.HasSiblingWithName(ctx, folder.WorkspaceID, folder.ParentID, name, &folder.ID)
+	if err != nil {
+		return domain.Folder{}, err
+	}
+	if exists {
+		return domain.Folder{}, fmt.Errorf("%w: folder name already exists in this location", domain.ErrValidation)
+	}
+
+	return s.folders.UpdateName(ctx, folder.ID, name, time.Now().UTC())
 }

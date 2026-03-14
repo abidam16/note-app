@@ -62,6 +62,49 @@ func (r WorkspaceRepository) HasWorkspaceWithNameForUser(ctx context.Context, us
 	return exists, nil
 }
 
+func (r WorkspaceRepository) GetByID(ctx context.Context, workspaceID string) (domain.Workspace, error) {
+	query := `SELECT id, name, created_at, updated_at FROM workspaces WHERE id = $1`
+
+	var workspace domain.Workspace
+	if err := r.db.QueryRow(ctx, query, workspaceID).Scan(
+		&workspace.ID,
+		&workspace.Name,
+		&workspace.CreatedAt,
+		&workspace.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Workspace{}, domain.ErrNotFound
+		}
+		return domain.Workspace{}, fmt.Errorf("select workspace by id: %w", err)
+	}
+
+	return workspace, nil
+}
+
+func (r WorkspaceRepository) UpdateName(ctx context.Context, workspaceID, name string, updatedAt time.Time) (domain.Workspace, error) {
+	query := `
+		UPDATE workspaces
+		SET name = $2, updated_at = $3
+		WHERE id = $1
+		RETURNING id, name, created_at, updated_at
+	`
+
+	var workspace domain.Workspace
+	if err := r.db.QueryRow(ctx, query, workspaceID, name, updatedAt).Scan(
+		&workspace.ID,
+		&workspace.Name,
+		&workspace.CreatedAt,
+		&workspace.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Workspace{}, domain.ErrNotFound
+		}
+		return domain.Workspace{}, fmt.Errorf("update workspace name: %w", err)
+	}
+
+	return workspace, nil
+}
+
 func (r WorkspaceRepository) ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error) {
 	query := `
         SELECT w.id, w.name, w.created_at, w.updated_at

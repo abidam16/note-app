@@ -13,16 +13,47 @@ type fakeWorkspaceRepo struct {
 	memberships map[string][]domain.WorkspaceMember
 	invitations map[string]domain.WorkspaceInvitation
 	owners      map[string]int
+	workspaces  map[string]domain.Workspace
 }
 
 func (r *fakeWorkspaceRepo) CreateWithOwner(_ context.Context, workspace domain.Workspace, member domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error) {
 	r.memberships[workspace.ID] = []domain.WorkspaceMember{member}
 	r.owners[workspace.ID] = 1
+	if r.workspaces == nil {
+		r.workspaces = map[string]domain.Workspace{}
+	}
+	r.workspaces[workspace.ID] = workspace
 	return workspace, member, nil
 }
 
 func (r *fakeWorkspaceRepo) HasWorkspaceWithNameForUser(_ context.Context, userID, workspaceName string) (bool, error) {
+	for workspaceID, members := range r.memberships {
+		for _, member := range members {
+			if member.UserID == userID && equalNormalizedName(r.workspaces[workspaceID].Name, workspaceName) {
+				return true, nil
+			}
+		}
+	}
 	return false, nil
+}
+
+func (r *fakeWorkspaceRepo) GetByID(_ context.Context, workspaceID string) (domain.Workspace, error) {
+	workspace, ok := r.workspaces[workspaceID]
+	if !ok {
+		return domain.Workspace{}, domain.ErrNotFound
+	}
+	return workspace, nil
+}
+
+func (r *fakeWorkspaceRepo) UpdateName(_ context.Context, workspaceID, name string, updatedAt time.Time) (domain.Workspace, error) {
+	workspace, ok := r.workspaces[workspaceID]
+	if !ok {
+		return domain.Workspace{}, domain.ErrNotFound
+	}
+	workspace.Name = name
+	workspace.UpdatedAt = updatedAt
+	r.workspaces[workspaceID] = workspace
+	return workspace, nil
 }
 
 func (r *fakeWorkspaceRepo) ListByUserID(_ context.Context, userID string) ([]domain.Workspace, error) {
@@ -112,7 +143,7 @@ func (r *fakeWorkspaceRepo) CountOwners(_ context.Context, workspaceID string) (
 }
 
 func TestWorkspaceServiceCreateWorkspace(t *testing.T) {
-	workspaces := &fakeWorkspaceRepo{memberships: map[string][]domain.WorkspaceMember{}, invitations: map[string]domain.WorkspaceInvitation{}, owners: map[string]int{}}
+	workspaces := &fakeWorkspaceRepo{memberships: map[string][]domain.WorkspaceMember{}, invitations: map[string]domain.WorkspaceInvitation{}, owners: map[string]int{}, workspaces: map[string]domain.Workspace{}}
 	users := &fakeUserRepo{byEmail: map[string]domain.User{}, byID: map[string]domain.User{"user-1": {ID: "user-1", Email: "owner@example.com", FullName: "Owner"}}}
 	service := NewWorkspaceService(workspaces, users)
 
@@ -138,6 +169,7 @@ func TestWorkspaceServiceProtectsLastOwner(t *testing.T) {
 		},
 		invitations: map[string]domain.WorkspaceInvitation{},
 		owners:      map[string]int{"workspace-1": 1},
+		workspaces:  map[string]domain.Workspace{"workspace-1": {ID: "workspace-1", Name: "Product"}},
 	}
 	users := &fakeUserRepo{byEmail: map[string]domain.User{}, byID: map[string]domain.User{"user-1": {ID: "user-1", Email: "owner@example.com", FullName: "Owner"}}}
 	service := NewWorkspaceService(workspaces, users)

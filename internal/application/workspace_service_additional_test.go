@@ -10,17 +10,19 @@ import (
 )
 
 type workspaceRepoStub struct {
-	createWithOwnerFn            func(context.Context, domain.Workspace, domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error)
+	createWithOwnerFn             func(context.Context, domain.Workspace, domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error)
 	hasWorkspaceWithNameForUserFn func(context.Context, string, string) (bool, error)
-	listByUserIDFn               func(context.Context, string) ([]domain.Workspace, error)
-	getMembershipByUserIDFn      func(context.Context, string, string) (domain.WorkspaceMember, error)
-	createInvitationFn           func(context.Context, domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error)
-	getActiveInvitationByEmailFn func(context.Context, string, string) (domain.WorkspaceInvitation, error)
-	getInvitationByIDFn          func(context.Context, string) (domain.WorkspaceInvitation, error)
-	acceptInvitationFn           func(context.Context, string, string, time.Time) (domain.WorkspaceMember, error)
-	listMembersFn                func(context.Context, string) ([]domain.WorkspaceMember, error)
-	updateMemberRoleFn           func(context.Context, string, string, domain.WorkspaceRole) (domain.WorkspaceMember, error)
-	countOwnersFn                func(context.Context, string) (int, error)
+	getByIDFn                     func(context.Context, string) (domain.Workspace, error)
+	updateNameFn                  func(context.Context, string, string, time.Time) (domain.Workspace, error)
+	listByUserIDFn                func(context.Context, string) ([]domain.Workspace, error)
+	getMembershipByUserIDFn       func(context.Context, string, string) (domain.WorkspaceMember, error)
+	createInvitationFn            func(context.Context, domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error)
+	getActiveInvitationByEmailFn  func(context.Context, string, string) (domain.WorkspaceInvitation, error)
+	getInvitationByIDFn           func(context.Context, string) (domain.WorkspaceInvitation, error)
+	acceptInvitationFn            func(context.Context, string, string, time.Time) (domain.WorkspaceMember, error)
+	listMembersFn                 func(context.Context, string) ([]domain.WorkspaceMember, error)
+	updateMemberRoleFn            func(context.Context, string, string, domain.WorkspaceRole) (domain.WorkspaceMember, error)
+	countOwnersFn                 func(context.Context, string) (int, error)
 }
 
 func (s workspaceRepoStub) CreateWithOwner(ctx context.Context, w domain.Workspace, m domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error) {
@@ -34,6 +36,18 @@ func (s workspaceRepoStub) HasWorkspaceWithNameForUser(ctx context.Context, user
 		return s.hasWorkspaceWithNameForUserFn(ctx, userID, workspaceName)
 	}
 	return false, nil
+}
+func (s workspaceRepoStub) GetByID(ctx context.Context, workspaceID string) (domain.Workspace, error) {
+	if s.getByIDFn != nil {
+		return s.getByIDFn(ctx, workspaceID)
+	}
+	return domain.Workspace{}, domain.ErrNotFound
+}
+func (s workspaceRepoStub) UpdateName(ctx context.Context, workspaceID, name string, updatedAt time.Time) (domain.Workspace, error) {
+	if s.updateNameFn != nil {
+		return s.updateNameFn(ctx, workspaceID, name, updatedAt)
+	}
+	return domain.Workspace{ID: workspaceID, Name: name, UpdatedAt: updatedAt}, nil
 }
 func (s workspaceRepoStub) ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error) {
 	if s.listByUserIDFn != nil {
@@ -138,6 +152,56 @@ func TestWorkspaceServiceAdditionalBranches(t *testing.T) {
 		}
 		if len(items) != 1 || items[0].ID != "w1" {
 			t.Fatalf("unexpected workspace list: %+v", items)
+		}
+	})
+
+	t.Run("rename workspace validation and auth", func(t *testing.T) {
+		svc := NewWorkspaceService(workspaceRepoStub{}, users)
+		if _, err := svc.RenameWorkspace(context.Background(), "user-1", RenameWorkspaceInput{WorkspaceID: "w1", Name: "   "}); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("expected rename validation error, got %v", err)
+		}
+
+		svc = NewWorkspaceService(workspaceRepoStub{
+			getMembershipByUserIDFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
+				return domain.WorkspaceMember{Role: domain.RoleEditor}, nil
+			},
+		}, users)
+		if _, err := svc.RenameWorkspace(context.Background(), "user-1", RenameWorkspaceInput{WorkspaceID: "w1", Name: "New Name"}); !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("expected forbidden for non-owner rename, got %v", err)
+		}
+
+		svc = NewWorkspaceService(workspaceRepoStub{
+			getMembershipByUserIDFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
+				return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+			},
+			getByIDFn: func(context.Context, string) (domain.Workspace, error) {
+				return domain.Workspace{ID: "w1", Name: "Engineering"}, nil
+			},
+			hasWorkspaceWithNameForUserFn: func(context.Context, string, string) (bool, error) {
+				return true, nil
+			},
+		}, users)
+		if _, err := svc.RenameWorkspace(context.Background(), "user-1", RenameWorkspaceInput{WorkspaceID: "w1", Name: "Product"}); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("expected duplicate rename validation, got %v", err)
+		}
+
+		svc = NewWorkspaceService(workspaceRepoStub{
+			getMembershipByUserIDFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
+				return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+			},
+			getByIDFn: func(context.Context, string) (domain.Workspace, error) {
+				return domain.Workspace{ID: "w1", Name: "Engineering"}, nil
+			},
+			updateNameFn: func(_ context.Context, workspaceID, name string, updatedAt time.Time) (domain.Workspace, error) {
+				return domain.Workspace{ID: workspaceID, Name: name, UpdatedAt: updatedAt}, nil
+			},
+		}, users)
+		renamed, err := svc.RenameWorkspace(context.Background(), "user-1", RenameWorkspaceInput{WorkspaceID: "w1", Name: "  engineering  "})
+		if err != nil {
+			t.Fatalf("expected same-normalized rename to succeed, got %v", err)
+		}
+		if renamed.Name != "engineering" {
+			t.Fatalf("expected trimmed rename result, got %q", renamed.Name)
 		}
 	})
 

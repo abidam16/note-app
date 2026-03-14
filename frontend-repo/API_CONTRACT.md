@@ -294,6 +294,18 @@ Exception:
     - `workspace` must be unique
     - if workspace already exist, returns `422 validation_failed`
 
+### PATCH `/api/v1/workspaces/{workspaceID}`
+- Auth: yes (`owner`)
+- Request:
+```json
+{ "name": "Platform" }
+```
+- Response `200`: updated `Workspace`
+- Validation:
+    - `name` is required after trim
+    - duplicate workspace name for the acting user returns `422 validation_failed`
+    - duplicate comparison is trim-aware and case-insensitive
+
 ### POST `/api/v1/workspaces/{workspaceID}/invitations`
 - Auth: yes (`owner`)
 - Request:
@@ -331,10 +343,30 @@ Exception:
 { "name": "Engineering", "parent_id": "uuid-or-null" }
 ```
 - Response `201`: `Folder`
+- Validation:
+    - `name` is required after trim
+    - sibling folder names must be unique within the same `(workspace_id, parent_id)` scope
+    - root folders are siblings of other root folders
+    - duplicate comparison is trim-aware and case-insensitive
+    - same folder name is allowed under different parents
 
 ### GET `/api/v1/workspaces/{workspaceID}/folders`
 - Auth: yes (workspace member)
 - Response `200`: `Folder[]`
+
+### PATCH `/api/v1/folders/{folderID}`
+- Auth: yes (`owner|editor`)
+- Request:
+```json
+{ "name": "Platform" }
+```
+- Response `200`: updated `Folder`
+- Validation:
+    - `name` is required after trim
+    - rename only updates `name`; moving folders is not supported by this endpoint
+    - sibling folder names must be unique within the same `(workspace_id, parent_id)` scope
+    - duplicate comparison is trim-aware and case-insensitive
+    - same folder name is allowed under different parents
 
 ## 3.5 Pages and Drafts
 

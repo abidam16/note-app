@@ -30,6 +30,10 @@ type createWorkspaceRequest struct {
 	Name string `json:"name"`
 }
 
+type updateWorkspaceRequest struct {
+	Name string `json:"name"`
+}
+
 type inviteMemberRequest struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
@@ -42,6 +46,10 @@ type updateMemberRoleRequest struct {
 type createFolderRequest struct {
 	Name     string  `json:"name"`
 	ParentID *string `json:"parent_id"`
+}
+
+type updateFolderRequest struct {
+	Name string `json:"name"`
 }
 
 type createPageRequest struct {
@@ -183,6 +191,27 @@ func (s Server) handleListWorkspaces() http.HandlerFunc {
 	}
 }
 
+func (s Server) handleRenameWorkspace() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req updateWorkspaceRequest
+		if err := DecodeJSON(r, &req); err != nil {
+			WriteError(w, r, http.StatusBadRequest, NewAPIError("invalid_json", "request body must be valid JSON"))
+			return
+		}
+
+		workspace, err := s.workspaceService.RenameWorkspace(r.Context(), requestContextUserID(r.Context()), application.RenameWorkspaceInput{
+			WorkspaceID: chi.URLParam(r, "workspaceID"),
+			Name:        req.Name,
+		})
+		if err != nil {
+			s.writeMappedError(w, r, err)
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, workspace)
+	}
+}
+
 func (s Server) handleInviteMember() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req inviteMemberRequest
@@ -290,6 +319,27 @@ func (s Server) handleListFolders() http.HandlerFunc {
 		}
 
 		WriteJSON(w, http.StatusOK, folders)
+	}
+}
+
+func (s Server) handleRenameFolder() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req updateFolderRequest
+		if err := DecodeJSON(r, &req); err != nil {
+			WriteError(w, r, http.StatusBadRequest, NewAPIError("invalid_json", "request body must be valid JSON"))
+			return
+		}
+
+		folder, err := s.folderService.RenameFolder(r.Context(), requestContextUserID(r.Context()), application.RenameFolderInput{
+			FolderID: chi.URLParam(r, "folderID"),
+			Name:     req.Name,
+		})
+		if err != nil {
+			s.writeMappedError(w, r, err)
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, folder)
 	}
 }
 

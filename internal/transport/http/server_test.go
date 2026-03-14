@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,11 @@ type testFolderRepo struct {
 }
 
 func (r *testFolderRepo) Create(_ context.Context, folder domain.Folder) (domain.Folder, error) {
+	for _, existing := range r.byWorkspace[folder.WorkspaceID] {
+		if testFolderLocationEqual(existing.ParentID, folder.ParentID) && strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(folder.Name)) {
+			return domain.Folder{}, domain.ErrValidation
+		}
+	}
 	r.byID[folder.ID] = folder
 	r.byWorkspace[folder.WorkspaceID] = append(r.byWorkspace[folder.WorkspaceID], folder)
 	return folder, nil
@@ -55,6 +61,45 @@ func (r *testFolderRepo) GetByID(_ context.Context, folderID string) (domain.Fol
 
 func (r *testFolderRepo) ListByWorkspaceID(_ context.Context, workspaceID string) ([]domain.Folder, error) {
 	return r.byWorkspace[workspaceID], nil
+}
+
+func (r *testFolderRepo) HasSiblingWithName(_ context.Context, workspaceID string, parentID *string, name string, excludeFolderID *string) (bool, error) {
+	for _, folder := range r.byWorkspace[workspaceID] {
+		if excludeFolderID != nil && folder.ID == *excludeFolderID {
+			continue
+		}
+		if testFolderLocationEqual(folder.ParentID, parentID) && strings.EqualFold(strings.TrimSpace(folder.Name), strings.TrimSpace(name)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *testFolderRepo) UpdateName(_ context.Context, folderID, name string, updatedAt time.Time) (domain.Folder, error) {
+	folder, ok := r.byID[folderID]
+	if !ok {
+		return domain.Folder{}, domain.ErrNotFound
+	}
+	for idx, existing := range r.byWorkspace[folder.WorkspaceID] {
+		if existing.ID == folderID {
+			folder.Name = name
+			folder.UpdatedAt = updatedAt
+			r.byWorkspace[folder.WorkspaceID][idx] = folder
+			r.byID[folderID] = folder
+			return folder, nil
+		}
+	}
+	return domain.Folder{}, domain.ErrNotFound
+}
+
+func testFolderLocationEqual(left, right *string) bool {
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	return *left == *right
 }
 
 type testPageRepo struct {
@@ -273,6 +318,7 @@ func TestFolderEndpoints(t *testing.T) {
 		memberships: map[string][]domain.WorkspaceMember{
 			"workspace-1": {
 				{ID: "member-1", WorkspaceID: "workspace-1", UserID: "user-1", Role: domain.RoleEditor},
+				{ID: "member-2", WorkspaceID: "workspace-1", UserID: "user-2", Role: domain.RoleViewer},
 			},
 		},
 	}
@@ -281,6 +327,10 @@ func TestFolderEndpoints(t *testing.T) {
 	server := NewServer(logger, application.AuthService{}, application.WorkspaceService{}, folderService, application.PageService{}, application.RevisionService{}, tokenManager, storage.NewLocal(t.TempDir()))
 
 	accessToken, _, err := tokenManager.GenerateAccessToken("user-1", "user@example.com", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("GenerateAccessToken() error = %v", err)
+	}
+	viewerToken, _, err := tokenManager.GenerateAccessToken("user-2", "viewer@example.com", time.Now().UTC())
 	if err != nil {
 		t.Fatalf("GenerateAccessToken() error = %v", err)
 	}
@@ -312,6 +362,33 @@ func TestFolderEndpoints(t *testing.T) {
 	}
 	if len(payload.Data) != 1 || payload.Data[0].Name != "Engineering" {
 		t.Fatalf("unexpected folders payload: %+v", payload.Data)
+	}
+
+	renameReq := httptest.NewRequest(http.MethodPatch, "/api/v1/folders/"+payload.Data[0].ID, bytes.NewBufferString(`{"name":"Platform"}`))
+	renameReq.Header.Set("Authorization", "Bearer "+accessToken)
+	renameReq.Header.Set("Content-Type", "application/json")
+	renameRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(renameRec, renameReq)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("expected rename folder status 200, got %d body=%s", renameRec.Code, renameRec.Body.String())
+	}
+
+	duplicateReq := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/workspace-1/folders", bytes.NewBufferString(`{"name":" platform "}`))
+	duplicateReq.Header.Set("Authorization", "Bearer "+accessToken)
+	duplicateReq.Header.Set("Content-Type", "application/json")
+	duplicateRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(duplicateRec, duplicateReq)
+	if duplicateRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected duplicate folder status 422, got %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
+	}
+
+	viewerRenameReq := httptest.NewRequest(http.MethodPatch, "/api/v1/folders/"+payload.Data[0].ID, bytes.NewBufferString(`{"name":"Viewer Attempt"}`))
+	viewerRenameReq.Header.Set("Authorization", "Bearer "+viewerToken)
+	viewerRenameReq.Header.Set("Content-Type", "application/json")
+	viewerRenameRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(viewerRenameRec, viewerRenameReq)
+	if viewerRenameRec.Code != http.StatusForbidden {
+		t.Fatalf("expected viewer rename folder status 403, got %d body=%s", viewerRenameRec.Code, viewerRenameRec.Body.String())
 	}
 }
 
