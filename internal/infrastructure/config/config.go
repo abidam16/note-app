@@ -29,7 +29,7 @@ func Load() (Config, error) {
 
 	cfg := Config{
 		AppEnv:           getEnv("APP_ENV", "development"),
-		HTTPPort:         getEnv("HTTP_PORT", "8080"),
+		HTTPPort:         getEnv("PORT", getEnv("HTTP_PORT", "8080")),
 		PostgresDSN:      os.Getenv("POSTGRES_DSN"),
 		JWTIssuer:        getEnv("JWT_ISSUER", "note-app"),
 		JWTSecret:        os.Getenv("JWT_SECRET"),
