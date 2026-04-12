@@ -34,28 +34,33 @@ type RestoreRevisionResult struct {
 }
 
 type RevisionService struct {
-	revisions   RevisionRepository
-	pages       RevisionPageRepository
-	memberships WorkspaceMembershipReader
+	revisions     RevisionRepository
+	pages         RevisionPageRepository
+	memberships   WorkspaceMembershipReader
+	threadAnchors ThreadAnchorReevaluator
 }
 
-func NewRevisionService(revisions RevisionRepository, pages RevisionPageRepository, memberships WorkspaceMembershipReader) RevisionService {
-	return RevisionService{
+func NewRevisionService(revisions RevisionRepository, pages RevisionPageRepository, memberships WorkspaceMembershipReader, threadAnchors ...ThreadAnchorReevaluator) RevisionService {
+	service := RevisionService{
 		revisions:   revisions,
 		pages:       pages,
 		memberships: memberships,
 	}
+	if len(threadAnchors) > 0 {
+		service.threadAnchors = threadAnchors[0]
+	}
+	return service
 }
 
 func (s RevisionService) CreateRevision(ctx context.Context, actorID string, input CreateRevisionInput) (domain.Revision, error) {
-	page, draft, err := s.pages.GetByID(ctx, input.PageID)
+	page, draft, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, input.PageID)
 	if err != nil {
 		return domain.Revision{}, err
 	}
 
 	membership, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID)
 	if err != nil {
-		return domain.Revision{}, err
+		return domain.Revision{}, hideForeignResourceMembershipError(err)
 	}
 	if membership.Role == domain.RoleViewer {
 		return domain.Revision{}, domain.ErrForbidden
@@ -79,16 +84,12 @@ func (s RevisionService) CreateRevision(ctx context.Context, actorID string, inp
 }
 
 func (s RevisionService) ListRevisions(ctx context.Context, actorID, pageID string) ([]domain.Revision, error) {
-	page, _, err := s.pages.GetByID(ctx, pageID)
+	page, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, pageID)
 	if err != nil {
 		return nil, err
 	}
 
-	if _, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID); err != nil {
-		return nil, err
-	}
-
-	return s.revisions.ListByPageID(ctx, pageID)
+	return s.revisions.ListByPageID(ctx, page.ID)
 }
 
 func normalizeOptionalText(value *string) *string {

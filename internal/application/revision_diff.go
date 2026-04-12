@@ -16,16 +16,31 @@ type CompareRevisionsInput struct {
 	ToRevisionID   string
 }
 
+type revisionBlockInfo struct {
+	fingerprint string
+	snapshot    *domain.RevisionDiffSnapshot
+}
+
+type sequenceEditType uint8
+
+const (
+	sequenceEqual sequenceEditType = iota
+	sequenceAdd
+	sequenceRemove
+)
+
+type sequenceEdit struct {
+	typ    sequenceEditType
+	fromIx int
+	toIx   int
+}
+
 func (s RevisionService) CompareRevisions(ctx context.Context, actorID string, input CompareRevisionsInput) (domain.RevisionDiff, error) {
 	if strings.TrimSpace(input.FromRevisionID) == "" || strings.TrimSpace(input.ToRevisionID) == "" {
 		return domain.RevisionDiff{}, fmt.Errorf("%w: from and to revision ids are required", domain.ErrValidation)
 	}
 
-	page, _, err := s.pages.GetByID(ctx, input.PageID)
-	if err != nil {
-		return domain.RevisionDiff{}, err
-	}
-	if _, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID); err != nil {
+	if _, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, input.PageID); err != nil {
 		return domain.RevisionDiff{}, err
 	}
 
@@ -70,60 +85,204 @@ func buildRevisionDiffBlocks(fromContent, toContent json.RawMessage) ([]domain.R
 		return nil, err
 	}
 
-	fromFingerprints := make([]string, len(fromBlocks))
-	for i, block := range fromBlocks {
-		fromFingerprints[i] = compactJSON(block)
+	fromInfos := buildRevisionBlockInfo(fromBlocks)
+	toInfos := buildRevisionBlockInfo(toBlocks)
+
+	fromFingerprints := make([]string, len(fromInfos))
+	for i := range fromInfos {
+		fromFingerprints[i] = fromInfos[i].fingerprint
 	}
-	toFingerprints := make([]string, len(toBlocks))
-	for i, block := range toBlocks {
-		toFingerprints[i] = compactJSON(block)
+	toFingerprints := make([]string, len(toInfos))
+	for i := range toInfos {
+		toFingerprints[i] = toInfos[i].fingerprint
 	}
 
-	lcs := buildLCSMatrix(fromFingerprints, toFingerprints)
-	result := make([]domain.RevisionDiffBlock, 0)
+	edits := buildMyersEdits(fromFingerprints, toFingerprints)
+	result := make([]domain.RevisionDiffBlock, 0, len(fromInfos)+len(toInfos))
 	index := 0
-	for i, j := 0, 0; i < len(fromBlocks) || j < len(toBlocks); {
-		switch {
-		case i < len(fromBlocks) && j < len(toBlocks) && fromFingerprints[i] == toFingerprints[j]:
+	for i := 0; i < len(edits); i++ {
+		edit := edits[i]
+		switch edit.typ {
+		case sequenceEqual:
 			result = append(result, domain.RevisionDiffBlock{
 				Index:  index,
 				Status: "unchanged",
-				From:   blockSnapshot(fromBlocks[i]),
-				To:     blockSnapshot(toBlocks[j]),
+				From:   fromInfos[edit.fromIx].snapshot,
+				To:     toInfos[edit.toIx].snapshot,
+				Lines:  buildBlockLines("unchanged", fromInfos[edit.fromIx].snapshot, toInfos[edit.toIx].snapshot),
 			})
-			i++
-			j++
-		case i < len(fromBlocks) && j < len(toBlocks) && blockType(fromBlocks[i]) == blockType(toBlocks[j]):
-			fromSnapshot := blockSnapshot(fromBlocks[i])
-			toSnapshot := blockSnapshot(toBlocks[j])
-			result = append(result, domain.RevisionDiffBlock{
-				Index:      index,
-				Status:     "modified",
-				From:       fromSnapshot,
-				To:         toSnapshot,
-				InlineDiff: diffText(fromSnapshot.Text, toSnapshot.Text),
-			})
-			i++
-			j++
-		case j < len(toBlocks) && (i == len(fromBlocks) || lcs[i][j+1] >= lcs[i+1][j]):
-			result = append(result, domain.RevisionDiffBlock{
-				Index:  index,
-				Status: "added",
-				To:     blockSnapshot(toBlocks[j]),
-			})
-			j++
-		default:
+		case sequenceRemove:
+			if i+1 < len(edits) && edits[i+1].typ == sequenceAdd {
+				fromSnapshot := fromInfos[edit.fromIx].snapshot
+				toSnapshot := toInfos[edits[i+1].toIx].snapshot
+				if fromSnapshot.Type == toSnapshot.Type {
+					result = append(result, domain.RevisionDiffBlock{
+						Index:      index,
+						Status:     "modified",
+						From:       fromSnapshot,
+						To:         toSnapshot,
+						InlineDiff: diffText(fromSnapshot.Text, toSnapshot.Text),
+						Lines:      buildBlockLines("modified", fromSnapshot, toSnapshot),
+					})
+					i++
+					index++
+					continue
+				}
+			}
 			result = append(result, domain.RevisionDiffBlock{
 				Index:  index,
 				Status: "removed",
-				From:   blockSnapshot(fromBlocks[i]),
+				From:   fromInfos[edit.fromIx].snapshot,
+				Lines:  buildBlockLines("removed", fromInfos[edit.fromIx].snapshot, nil),
 			})
-			i++
+		case sequenceAdd:
+			result = append(result, domain.RevisionDiffBlock{
+				Index:  index,
+				Status: "added",
+				To:     toInfos[edit.toIx].snapshot,
+				Lines:  buildBlockLines("added", nil, toInfos[edit.toIx].snapshot),
+			})
 		}
 		index++
 	}
 
 	return result, nil
+}
+
+func buildRevisionBlockInfo(blocks []json.RawMessage) []revisionBlockInfo {
+	info := make([]revisionBlockInfo, len(blocks))
+	for i := range blocks {
+		info[i] = revisionBlockInfo{
+			// Revision payloads may carry editor-generated block ids that change on
+			// save even when the visible content did not. Strip those ids so Myers
+			// can align semantically equal blocks instead of cascading false edits.
+			fingerprint: normalizeBlockFingerprint(blocks[i]),
+			snapshot:    blockSnapshot(blocks[i]),
+		}
+	}
+	return info
+}
+
+func normalizeBlockFingerprint(raw json.RawMessage) string {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return compactJSON(raw)
+	}
+
+	normalized, err := json.Marshal(stripDiffMetadata(value))
+	if err != nil {
+		return compactJSON(raw)
+	}
+	return compactJSON(normalized)
+}
+
+func stripDiffMetadata(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cleaned := make(map[string]any, len(typed))
+		for key, child := range typed {
+			if key == "id" {
+				continue
+			}
+			cleaned[key] = stripDiffMetadata(child)
+		}
+		return cleaned
+	case []any:
+		for i := range typed {
+			typed[i] = stripDiffMetadata(typed[i])
+		}
+		return typed
+	default:
+		return typed
+	}
+}
+
+func buildMyersEdits(from, to []string) []sequenceEdit {
+	maxDistance := len(from) + len(to)
+	if maxDistance == 0 {
+		return nil
+	}
+
+	offset := maxDistance
+	v := make([]int, 2*maxDistance+1)
+	trace := make([][]int, 0, maxDistance+1)
+
+	for d := 0; d <= maxDistance; d++ {
+		trace = append(trace, append([]int(nil), v...))
+		for k := -d; k <= d; k += 2 {
+			kIndex := offset + k
+			var x int
+			if k == -d || (k != d && v[kIndex-1] < v[kIndex+1]) {
+				x = v[kIndex+1]
+			} else {
+				x = v[kIndex-1] + 1
+			}
+
+			y := x - k
+			for x < len(from) && y < len(to) && from[x] == to[y] {
+				x++
+				y++
+			}
+			v[kIndex] = x
+			if x == len(from) && y == len(to) {
+				return backtrackMyersEdits(from, to, trace, v, offset, d)
+			}
+		}
+	}
+
+	return nil
+}
+
+func backtrackMyersEdits(from, to []string, trace [][]int, finalV []int, offset, distance int) []sequenceEdit {
+	trace = append(trace, append([]int(nil), finalV...))
+	x := len(from)
+	y := len(to)
+	edits := make([]sequenceEdit, 0, len(from)+len(to))
+
+	for d := distance; d >= 0; d-- {
+		v := trace[d]
+		k := x - y
+		kIndex := offset + k
+
+		var prevK int
+		if d == 0 {
+			prevK = 0
+		} else if k == -d || (k != d && v[kIndex-1] < v[kIndex+1]) {
+			prevK = k + 1
+		} else {
+			prevK = k - 1
+		}
+
+		prevX := v[offset+prevK]
+		prevY := prevX - prevK
+
+		for x > prevX && y > prevY {
+			x--
+			y--
+			edits = append(edits, sequenceEdit{typ: sequenceEqual, fromIx: x, toIx: y})
+		}
+
+		if d == 0 {
+			break
+		}
+
+		if x == prevX {
+			y--
+			edits = append(edits, sequenceEdit{typ: sequenceAdd, toIx: y})
+		} else {
+			x--
+			edits = append(edits, sequenceEdit{typ: sequenceRemove, fromIx: x})
+		}
+	}
+
+	reverseSequenceEdits(edits)
+	return edits
+}
+
+func reverseSequenceEdits(edits []sequenceEdit) {
+	for left, right := 0, len(edits)-1; left < right; left, right = left+1, right-1 {
+		edits[left], edits[right] = edits[right], edits[left]
+	}
 }
 
 func decodeDocumentBlocks(content json.RawMessage) ([]json.RawMessage, error) {
@@ -136,6 +295,7 @@ func decodeDocumentBlocks(content json.RawMessage) ([]json.RawMessage, error) {
 
 func compactJSON(raw json.RawMessage) string {
 	var compacted bytes.Buffer
+	compacted.Grow(len(raw))
 	if err := json.Compact(&compacted, raw); err != nil {
 		return strings.TrimSpace(string(raw))
 	}
@@ -143,9 +303,15 @@ func compactJSON(raw json.RawMessage) string {
 }
 
 func buildLCSMatrix(a, b []string) [][]int {
-	matrix := make([][]int, len(a)+1)
+	rows := len(a) + 1
+	cols := len(b) + 1
+	// Keep the DP matrix in one backing slice to cut per-row allocations and
+	// improve cache locality during the reverse fill pass.
+	backing := make([]int, rows*cols)
+	matrix := make([][]int, rows)
 	for i := range matrix {
-		matrix[i] = make([]int, len(b)+1)
+		offset := i * cols
+		matrix[i] = backing[offset : offset+cols]
 	}
 	for i := len(a) - 1; i >= 0; i-- {
 		for j := len(b) - 1; j >= 0; j-- {
@@ -182,6 +348,204 @@ func blockType(raw json.RawMessage) string {
 		return "unknown"
 	}
 	return value
+}
+
+func buildBlockLines(status string, fromSnapshot, toSnapshot *domain.RevisionDiffSnapshot) []domain.RevisionDiffLine {
+	switch status {
+	case "unchanged":
+		return buildUnchangedBlockLines(splitSnapshotLines(fromSnapshot))
+	case "removed":
+		return buildRemovedBlockLines(splitSnapshotLines(fromSnapshot))
+	case "added":
+		return buildAddedBlockLines(splitSnapshotLines(toSnapshot))
+	case "modified":
+		return buildModifiedBlockLines(splitSnapshotLines(fromSnapshot), splitSnapshotLines(toSnapshot))
+	default:
+		return nil
+	}
+}
+
+func splitSnapshotLines(snapshot *domain.RevisionDiffSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	text := strings.ReplaceAll(snapshot.Text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = strings.TrimSuffix(text, "\n")
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
+}
+
+func buildUnchangedBlockLines(lines []string) []domain.RevisionDiffLine {
+	if len(lines) == 0 {
+		return nil
+	}
+	result := make([]domain.RevisionDiffLine, 0, len(lines))
+	for i, line := range lines {
+		fromLineNumber := i + 1
+		toLineNumber := i + 1
+		result = append(result, domain.RevisionDiffLine{
+			Operation:      "context",
+			FromLineNumber: intPtr(fromLineNumber),
+			ToLineNumber:   intPtr(toLineNumber),
+			Text:           line,
+		})
+	}
+	return result
+}
+
+func buildRemovedBlockLines(lines []string) []domain.RevisionDiffLine {
+	if len(lines) == 0 {
+		return nil
+	}
+	result := make([]domain.RevisionDiffLine, 0, len(lines))
+	for i, line := range lines {
+		fromLineNumber := i + 1
+		result = append(result, domain.RevisionDiffLine{
+			Operation:      "removed",
+			FromLineNumber: intPtr(fromLineNumber),
+			Text:           line,
+			Chunks: []domain.RevisionDiffTextChunk{
+				{Operation: "removed", Text: line},
+			},
+		})
+	}
+	return result
+}
+
+func buildAddedBlockLines(lines []string) []domain.RevisionDiffLine {
+	if len(lines) == 0 {
+		return nil
+	}
+	result := make([]domain.RevisionDiffLine, 0, len(lines))
+	for i, line := range lines {
+		toLineNumber := i + 1
+		result = append(result, domain.RevisionDiffLine{
+			Operation:    "added",
+			ToLineNumber: intPtr(toLineNumber),
+			Text:         line,
+			Chunks: []domain.RevisionDiffTextChunk{
+				{Operation: "added", Text: line},
+			},
+		})
+	}
+	return result
+}
+
+func buildModifiedBlockLines(fromLines, toLines []string) []domain.RevisionDiffLine {
+	if len(fromLines) == 0 {
+		return buildAddedBlockLines(toLines)
+	}
+	if len(toLines) == 0 {
+		return buildRemovedBlockLines(fromLines)
+	}
+
+	edits := buildMyersEdits(fromLines, toLines)
+	result := make([]domain.RevisionDiffLine, 0, len(fromLines)+len(toLines))
+	for i := 0; i < len(edits); i++ {
+		edit := edits[i]
+		if edit.typ == sequenceEqual {
+			fromLineNumber := edit.fromIx + 1
+			toLineNumber := edit.toIx + 1
+			result = append(result, domain.RevisionDiffLine{
+				Operation:      "context",
+				FromLineNumber: intPtr(fromLineNumber),
+				ToLineNumber:   intPtr(toLineNumber),
+				Text:           fromLines[edit.fromIx],
+			})
+			continue
+		}
+
+		removed := make([]int, 0, 2)
+		added := make([]int, 0, 2)
+		for ; i < len(edits) && edits[i].typ != sequenceEqual; i++ {
+			switch edits[i].typ {
+			case sequenceRemove:
+				removed = append(removed, edits[i].fromIx)
+			case sequenceAdd:
+				added = append(added, edits[i].toIx)
+			}
+		}
+		i--
+
+		pairCount := len(removed)
+		if len(added) < pairCount {
+			pairCount = len(added)
+		}
+
+		for j := 0; j < pairCount; j++ {
+			removedChunks, addedChunks := buildPairedLineChunks(fromLines[removed[j]], toLines[added[j]])
+			fromLineNumber := removed[j] + 1
+			toLineNumber := added[j] + 1
+			result = append(result,
+				domain.RevisionDiffLine{
+					Operation:      "removed",
+					FromLineNumber: intPtr(fromLineNumber),
+					Text:           fromLines[removed[j]],
+					Chunks:         removedChunks,
+				},
+				domain.RevisionDiffLine{
+					Operation:    "added",
+					ToLineNumber: intPtr(toLineNumber),
+					Text:         toLines[added[j]],
+					Chunks:       addedChunks,
+				},
+			)
+		}
+
+		for _, fromIx := range removed[pairCount:] {
+			fromLineNumber := fromIx + 1
+			result = append(result, domain.RevisionDiffLine{
+				Operation:      "removed",
+				FromLineNumber: intPtr(fromLineNumber),
+				Text:           fromLines[fromIx],
+				Chunks: []domain.RevisionDiffTextChunk{
+					{Operation: "removed", Text: fromLines[fromIx]},
+				},
+			})
+		}
+		for _, toIx := range added[pairCount:] {
+			toLineNumber := toIx + 1
+			result = append(result, domain.RevisionDiffLine{
+				Operation:    "added",
+				ToLineNumber: intPtr(toLineNumber),
+				Text:         toLines[toIx],
+				Chunks: []domain.RevisionDiffTextChunk{
+					{Operation: "added", Text: toLines[toIx]},
+				},
+			})
+		}
+	}
+
+	return result
+}
+
+func buildPairedLineChunks(fromLine, toLine string) ([]domain.RevisionDiffTextChunk, []domain.RevisionDiffTextChunk) {
+	combined := diffText(fromLine, toLine)
+	return projectLineChunks(combined, "removed", fromLine), projectLineChunks(combined, "added", toLine)
+}
+
+func projectLineChunks(chunks []domain.RevisionDiffTextChunk, wantedOperation, fallback string) []domain.RevisionDiffTextChunk {
+	projected := make([]domain.RevisionDiffTextChunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk.Operation != "equal" && chunk.Operation != wantedOperation {
+			continue
+		}
+		projected = appendTextChunk(projected, chunk.Operation, chunk.Text)
+	}
+	if len(projected) > 0 {
+		return projected
+	}
+	if fallback == "" {
+		return nil
+	}
+	return []domain.RevisionDiffTextChunk{{Operation: wantedOperation, Text: fallback}}
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func extractBlockText(obj map[string]json.RawMessage) string {
@@ -231,15 +595,20 @@ func extractListText(obj map[string]json.RawMessage) string {
 	if err := json.Unmarshal(rawItems, &items); err != nil {
 		return ""
 	}
-	parts := make([]string, 0, len(items))
+	var builder strings.Builder
+	validItems := 0
 	for _, rawItem := range items {
 		item, err := decodeObject(rawItem, "item")
 		if err != nil {
 			continue
 		}
-		parts = append(parts, extractTextContainer(item))
+		if validItems > 0 {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString(extractTextContainer(item))
+		validItems++
 	}
-	return strings.Join(parts, "\n")
+	return builder.String()
 }
 
 func extractTableText(obj map[string]json.RawMessage) string {
@@ -251,7 +620,8 @@ func extractTableText(obj map[string]json.RawMessage) string {
 	if err := json.Unmarshal(rawRows, &rows); err != nil {
 		return ""
 	}
-	rowTexts := make([]string, 0, len(rows))
+	var rowBuilder strings.Builder
+	validRows := 0
 	for _, rawRow := range rows {
 		row, err := decodeObject(rawRow, "row")
 		if err != nil {
@@ -265,17 +635,26 @@ func extractTableText(obj map[string]json.RawMessage) string {
 		if err := json.Unmarshal(rawCells, &cells); err != nil {
 			continue
 		}
-		cellTexts := make([]string, 0, len(cells))
+		var cellBuilder strings.Builder
+		validCells := 0
 		for _, rawCell := range cells {
 			cell, err := decodeObject(rawCell, "cell")
 			if err != nil {
 				continue
 			}
-			cellTexts = append(cellTexts, extractTextContainer(cell))
+			if validCells > 0 {
+				cellBuilder.WriteByte('\t')
+			}
+			cellBuilder.WriteString(extractTextContainer(cell))
+			validCells++
 		}
-		rowTexts = append(rowTexts, strings.Join(cellTexts, "\t"))
+		if validRows > 0 {
+			rowBuilder.WriteByte('\n')
+		}
+		rowBuilder.WriteString(cellBuilder.String())
+		validRows++
 	}
-	return strings.Join(rowTexts, "\n")
+	return rowBuilder.String()
 }
 
 func extractInlineNodesText(raw json.RawMessage) string {
@@ -283,7 +662,7 @@ func extractInlineNodesText(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &nodes); err != nil {
 		return ""
 	}
-	parts := make([]string, 0, len(nodes))
+	var builder strings.Builder
 	for _, rawNode := range nodes {
 		node, err := decodeObject(rawNode, "inline")
 		if err != nil {
@@ -293,41 +672,95 @@ func extractInlineNodesText(raw json.RawMessage) string {
 		if err != nil {
 			continue
 		}
-		parts = append(parts, text)
+		builder.WriteString(text)
 	}
-	return strings.Join(parts, "")
+	return builder.String()
 }
 
 func diffText(fromText, toText string) []domain.RevisionDiffTextChunk {
-	fromWords := strings.Fields(fromText)
-	toWords := strings.Fields(toText)
-	if len(fromWords) == 0 && len(toWords) == 0 {
+	fromTokens := tokenizeDiffText(fromText)
+	toTokens := tokenizeDiffText(toText)
+	if len(fromTokens) == 0 && len(toTokens) == 0 {
 		return nil
 	}
 
-	lcs := buildLCSMatrix(fromWords, toWords)
-	chunks := make([]domain.RevisionDiffTextChunk, 0)
-	for i, j := 0, 0; i < len(fromWords) || j < len(toWords); {
-		switch {
-		case i < len(fromWords) && j < len(toWords) && fromWords[i] == toWords[j]:
-			chunks = appendWordChunk(chunks, "equal", fromWords[i])
-			i++
-			j++
-		case j < len(toWords) && (i == len(fromWords) || lcs[i][j+1] >= lcs[i+1][j]):
-			chunks = appendWordChunk(chunks, "added", toWords[j])
-			j++
-		default:
-			chunks = appendWordChunk(chunks, "removed", fromWords[i])
-			i++
+	edits := buildMyersEdits(fromTokens, toTokens)
+	chunks := make([]domain.RevisionDiffTextChunk, 0, len(fromTokens)+len(toTokens))
+	for _, edit := range edits {
+		switch edit.typ {
+		case sequenceEqual:
+			chunks = appendTextChunk(chunks, "equal", fromTokens[edit.fromIx])
+		case sequenceAdd:
+			chunks = appendTextChunk(chunks, "added", toTokens[edit.toIx])
+		case sequenceRemove:
+			chunks = appendTextChunk(chunks, "removed", fromTokens[edit.fromIx])
 		}
 	}
 	return chunks
 }
 
-func appendWordChunk(chunks []domain.RevisionDiffTextChunk, operation, word string) []domain.RevisionDiffTextChunk {
-	if len(chunks) == 0 || chunks[len(chunks)-1].Operation != operation {
-		return append(chunks, domain.RevisionDiffTextChunk{Operation: operation, Text: word})
+func tokenizeDiffText(text string) []string {
+	if text == "" {
+		return nil
 	}
-	chunks[len(chunks)-1].Text += " " + word
+
+	tokens := make([]string, 0, len(text)/2+1)
+	var builder strings.Builder
+	currentClass := diffTokenClassUnknown
+
+	flush := func() {
+		if builder.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, builder.String())
+		builder.Reset()
+	}
+
+	for _, r := range text {
+		class := classifyDiffRune(r)
+		if class == diffTokenClassPunctuation {
+			flush()
+			tokens = append(tokens, string(r))
+			currentClass = diffTokenClassUnknown
+			continue
+		}
+		if builder.Len() > 0 && class != currentClass {
+			flush()
+		}
+		builder.WriteRune(r)
+		currentClass = class
+	}
+	flush()
+	return tokens
+}
+
+type diffTokenClass uint8
+
+const (
+	diffTokenClassUnknown diffTokenClass = iota
+	diffTokenClassWord
+	diffTokenClassWhitespace
+	diffTokenClassPunctuation
+)
+
+func classifyDiffRune(r rune) diffTokenClass {
+	switch {
+	case r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+		return diffTokenClassWord
+	case r == ' ' || r == '\t':
+		return diffTokenClassWhitespace
+	default:
+		return diffTokenClassPunctuation
+	}
+}
+
+func appendTextChunk(chunks []domain.RevisionDiffTextChunk, operation, text string) []domain.RevisionDiffTextChunk {
+	if text == "" {
+		return chunks
+	}
+	if len(chunks) == 0 || chunks[len(chunks)-1].Operation != operation {
+		return append(chunks, domain.RevisionDiffTextChunk{Operation: operation, Text: text})
+	}
+	chunks[len(chunks)-1].Text += text
 	return chunks
 }

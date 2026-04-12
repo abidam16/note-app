@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -60,8 +61,9 @@ func TestDecodeJSON(t *testing.T) {
 	}
 
 	var ok payload
+	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"name":"john"}`))
-	if err := DecodeJSON(req, &ok); err != nil {
+	if err := DecodeJSON(res, req, &ok); err != nil {
 		t.Fatalf("decode valid json: %v", err)
 	}
 	if ok.Name != "john" {
@@ -69,8 +71,36 @@ func TestDecodeJSON(t *testing.T) {
 	}
 
 	var bad payload
+	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"name":"john","extra":1}`))
-	if err := DecodeJSON(req, &bad); err == nil {
+	if err := DecodeJSON(res, req, &bad); err == nil {
 		t.Fatal("expected decode to fail on unknown field")
+	}
+}
+
+func TestDecodeJSONRejectsTrailingJSON(t *testing.T) {
+	type payload struct {
+		Name string `json:"name"`
+	}
+
+	var decoded payload
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"name":"john"}{"name":"doe"}`))
+	if err := DecodeJSON(res, req, &decoded); err == nil {
+		t.Fatal("expected trailing JSON to be rejected")
+	}
+}
+
+func TestDecodeJSONRejectsOversizedBody(t *testing.T) {
+	type payload struct {
+		Name string `json:"name"`
+	}
+
+	oversized := `{"name":"` + strings.Repeat("a", int(defaultJSONBodyLimitBytes)) + `"}`
+	var decoded payload
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(oversized))
+	if err := DecodeJSON(res, req, &decoded); err == nil {
+		t.Fatal("expected oversized JSON body to be rejected")
 	}
 }

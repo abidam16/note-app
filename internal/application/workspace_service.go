@@ -15,14 +15,20 @@ import (
 type WorkspaceRepository interface {
 	CreateWithOwner(ctx context.Context, workspace domain.Workspace, member domain.WorkspaceMember) (domain.Workspace, domain.WorkspaceMember, error)
 	HasWorkspaceWithNameForUser(ctx context.Context, userID, workspaceName string) (bool, error)
-	GetByID(ctx context.Context, workspaceID string) (domain.Workspace, error)
+	HasWorkspaceWithNameForUserExcludingID(ctx context.Context, userID, workspaceName, excludeWorkspaceID string) (bool, error)
 	UpdateName(ctx context.Context, workspaceID, name string, updatedAt time.Time) (domain.Workspace, error)
 	ListByUserID(ctx context.Context, userID string) ([]domain.Workspace, error)
 	GetMembershipByUserID(ctx context.Context, workspaceID, userID string) (domain.WorkspaceMember, error)
+	GetMembershipByID(ctx context.Context, workspaceID, memberID string) (domain.WorkspaceMember, error)
 	CreateInvitation(ctx context.Context, invitation domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error)
 	GetActiveInvitationByEmail(ctx context.Context, workspaceID, email string) (domain.WorkspaceInvitation, error)
 	GetInvitationByID(ctx context.Context, invitationID string) (domain.WorkspaceInvitation, error)
-	AcceptInvitation(ctx context.Context, invitationID, userID string, acceptedAt time.Time) (domain.WorkspaceMember, error)
+	AcceptInvitation(ctx context.Context, invitationID, userID string, version int64, acceptedAt time.Time) (domain.AcceptInvitationResult, error)
+	RejectInvitation(ctx context.Context, invitationID, userID string, version int64, rejectedAt time.Time) (domain.WorkspaceInvitation, error)
+	CancelInvitation(ctx context.Context, invitationID, userID string, version int64, cancelledAt time.Time) (domain.WorkspaceInvitation, error)
+	UpdateInvitation(ctx context.Context, invitationID string, role domain.WorkspaceRole, version int64, updatedAt time.Time) (domain.WorkspaceInvitation, error)
+	ListWorkspaceInvitations(ctx context.Context, workspaceID string, status domain.WorkspaceInvitationStatusFilter, limit int, cursor string) (domain.WorkspaceInvitationList, error)
+	ListMyInvitations(ctx context.Context, email string, status domain.WorkspaceInvitationStatusFilter, limit int, cursor string) (domain.WorkspaceInvitationList, error)
 	ListMembers(ctx context.Context, workspaceID string) ([]domain.WorkspaceMember, error)
 	UpdateMemberRole(ctx context.Context, workspaceID, memberID string, role domain.WorkspaceRole) (domain.WorkspaceMember, error)
 	CountOwners(ctx context.Context, workspaceID string) (int, error)
@@ -47,6 +53,40 @@ type UpdateMemberRoleInput struct {
 	WorkspaceID string
 	MemberID    string
 	Role        domain.WorkspaceRole
+}
+
+type ListWorkspaceInvitationsInput struct {
+	WorkspaceID string
+	Status      domain.WorkspaceInvitationStatusFilter
+	Limit       int
+	Cursor      string
+}
+
+type ListMyInvitationsInput struct {
+	Status domain.WorkspaceInvitationStatusFilter
+	Limit  int
+	Cursor string
+}
+
+type UpdateInvitationInput struct {
+	InvitationID string
+	Role         domain.WorkspaceRole
+	Version      int64
+}
+
+type AcceptInvitationInput struct {
+	InvitationID string
+	Version      int64
+}
+
+type RejectInvitationInput struct {
+	InvitationID string
+	Version      int64
+}
+
+type CancelInvitationInput struct {
+	InvitationID string
+	Version      int64
 }
 
 type WorkspaceService struct {
@@ -131,19 +171,12 @@ func (s WorkspaceService) RenameWorkspace(ctx context.Context, actorID string, i
 		return domain.Workspace{}, domain.ErrForbidden
 	}
 
-	workspace, err := s.workspaces.GetByID(ctx, input.WorkspaceID)
+	hasName, err := s.workspaces.HasWorkspaceWithNameForUserExcludingID(ctx, actorID, name, input.WorkspaceID)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-
-	if !equalNormalizedName(workspace.Name, name) {
-		hasName, err := s.workspaces.HasWorkspaceWithNameForUser(ctx, actorID, name)
-		if err != nil {
-			return domain.Workspace{}, err
-		}
-		if hasName {
-			return domain.Workspace{}, fmt.Errorf("%w: workspace name already exists", domain.ErrValidation)
-		}
+	if hasName {
+		return domain.Workspace{}, fmt.Errorf("%w: workspace name already exists", domain.ErrValidation)
 	}
 
 	return s.workspaces.UpdateName(ctx, input.WorkspaceID, name, time.Now().UTC())
@@ -166,10 +199,20 @@ func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, inpu
 	if err != nil {
 		return domain.WorkspaceInvitation{}, fmt.Errorf("%w: invalid email", domain.ErrValidation)
 	}
-	if _, err := s.users.GetByEmail(ctx, email); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return domain.WorkspaceInvitation{}, fmt.Errorf("%w: invitee must be a registered user", domain.ErrValidation)
+
+	user, err := s.users.GetByEmail(ctx, email)
+	switch {
+	case err == nil:
+		_, membershipErr := s.workspaces.GetMembershipByUserID(ctx, input.WorkspaceID, user.ID)
+		switch {
+		case membershipErr == nil:
+			return domain.WorkspaceInvitation{}, domain.ErrConflict
+		case errors.Is(membershipErr, domain.ErrForbidden):
+		default:
+			return domain.WorkspaceInvitation{}, membershipErr
 		}
+	case errors.Is(err, domain.ErrNotFound):
+	case err != nil:
 		return domain.WorkspaceInvitation{}, err
 	}
 
@@ -189,6 +232,9 @@ func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, inpu
 		Role:        input.Role,
 		InvitedBy:   actorID,
 		CreatedAt:   now,
+		Status:      domain.WorkspaceInvitationStatusPending,
+		Version:     1,
+		UpdatedAt:   now,
 	}
 
 	saved, err := s.workspaces.CreateInvitation(ctx, invitation)
@@ -205,25 +251,195 @@ func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, inpu
 	return saved, nil
 }
 
-func (s WorkspaceService) AcceptInvitation(ctx context.Context, actorID, invitationID string) (domain.WorkspaceMember, error) {
+func (s WorkspaceService) AcceptInvitation(ctx context.Context, actorID string, input AcceptInvitationInput) (domain.AcceptInvitationResult, error) {
+	if input.Version <= 0 {
+		return domain.AcceptInvitationResult{}, fmt.Errorf("%w: version must be greater than zero", domain.ErrValidation)
+	}
+
 	user, err := s.users.GetByID(ctx, actorID)
 	if err != nil {
-		return domain.WorkspaceMember{}, err
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.AcceptInvitationResult{}, domain.ErrUnauthorized
+		}
+		return domain.AcceptInvitationResult{}, err
 	}
 
-	invitation, err := s.workspaces.GetInvitationByID(ctx, invitationID)
+	invitation, err := s.workspaces.GetInvitationByID(ctx, input.InvitationID)
 	if err != nil {
-		return domain.WorkspaceMember{}, err
+		return domain.AcceptInvitationResult{}, err
 	}
 
-	if invitation.AcceptedAt != nil {
-		return domain.WorkspaceMember{}, domain.ErrConflict
+	if invitation.Status != domain.WorkspaceInvitationStatusPending {
+		return domain.AcceptInvitationResult{}, domain.ErrConflict
 	}
 	if !strings.EqualFold(user.Email, invitation.Email) {
-		return domain.WorkspaceMember{}, domain.ErrInvitationEmailMismatch
+		return domain.AcceptInvitationResult{}, domain.ErrNotFound
 	}
 
-	return s.workspaces.AcceptInvitation(ctx, invitationID, actorID, time.Now().UTC())
+	return s.workspaces.AcceptInvitation(ctx, input.InvitationID, actorID, input.Version, time.Now().UTC())
+}
+
+func (s WorkspaceService) RejectInvitation(ctx context.Context, actorID string, input RejectInvitationInput) (domain.WorkspaceInvitation, error) {
+	if input.Version <= 0 {
+		return domain.WorkspaceInvitation{}, fmt.Errorf("%w: version must be greater than zero", domain.ErrValidation)
+	}
+
+	user, err := s.users.GetByID(ctx, actorID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.WorkspaceInvitation{}, domain.ErrUnauthorized
+		}
+		return domain.WorkspaceInvitation{}, err
+	}
+
+	invitation, err := s.workspaces.GetInvitationByID(ctx, input.InvitationID)
+	if err != nil {
+		return domain.WorkspaceInvitation{}, err
+	}
+	if invitation.Status != domain.WorkspaceInvitationStatusPending {
+		return domain.WorkspaceInvitation{}, domain.ErrConflict
+	}
+	if !strings.EqualFold(user.Email, invitation.Email) {
+		return domain.WorkspaceInvitation{}, domain.ErrNotFound
+	}
+
+	return s.workspaces.RejectInvitation(ctx, input.InvitationID, actorID, input.Version, time.Now().UTC())
+}
+
+func (s WorkspaceService) CancelInvitation(ctx context.Context, actorID string, input CancelInvitationInput) (domain.WorkspaceInvitation, error) {
+	if input.Version <= 0 {
+		return domain.WorkspaceInvitation{}, fmt.Errorf("%w: version must be greater than zero", domain.ErrValidation)
+	}
+
+	if _, err := s.users.GetByID(ctx, actorID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.WorkspaceInvitation{}, domain.ErrUnauthorized
+		}
+		return domain.WorkspaceInvitation{}, err
+	}
+
+	invitation, err := s.workspaces.GetInvitationByID(ctx, input.InvitationID)
+	if err != nil {
+		return domain.WorkspaceInvitation{}, err
+	}
+
+	membership, err := s.workspaces.GetMembershipByUserID(ctx, invitation.WorkspaceID, actorID)
+	if err != nil {
+		if errors.Is(err, domain.ErrForbidden) {
+			return domain.WorkspaceInvitation{}, domain.ErrNotFound
+		}
+		return domain.WorkspaceInvitation{}, err
+	}
+	if membership.Role != domain.RoleOwner {
+		return domain.WorkspaceInvitation{}, domain.ErrForbidden
+	}
+	if invitation.Status != domain.WorkspaceInvitationStatusPending {
+		return domain.WorkspaceInvitation{}, domain.ErrConflict
+	}
+
+	return s.workspaces.CancelInvitation(ctx, input.InvitationID, actorID, input.Version, time.Now().UTC())
+}
+
+func (s WorkspaceService) UpdateInvitation(ctx context.Context, actorID string, input UpdateInvitationInput) (domain.WorkspaceInvitation, error) {
+	if !domain.IsValidWorkspaceRole(input.Role) {
+		return domain.WorkspaceInvitation{}, fmt.Errorf("%w: invalid role", domain.ErrValidation)
+	}
+	if input.Version <= 0 {
+		return domain.WorkspaceInvitation{}, fmt.Errorf("%w: version must be greater than zero", domain.ErrValidation)
+	}
+
+	invitation, err := s.workspaces.GetInvitationByID(ctx, input.InvitationID)
+	if err != nil {
+		return domain.WorkspaceInvitation{}, err
+	}
+
+	membership, err := s.workspaces.GetMembershipByUserID(ctx, invitation.WorkspaceID, actorID)
+	if err != nil {
+		return domain.WorkspaceInvitation{}, err
+	}
+	if membership.Role != domain.RoleOwner {
+		return domain.WorkspaceInvitation{}, domain.ErrForbidden
+	}
+
+	if invitation.Status != domain.WorkspaceInvitationStatusPending {
+		return domain.WorkspaceInvitation{}, domain.ErrConflict
+	}
+	if invitation.Version != input.Version {
+		return domain.WorkspaceInvitation{}, domain.ErrConflict
+	}
+	if invitation.Role == input.Role {
+		return invitation, nil
+	}
+
+	return s.workspaces.UpdateInvitation(ctx, input.InvitationID, input.Role, input.Version, time.Now().UTC())
+}
+
+func (s WorkspaceService) ListWorkspaceInvitations(ctx context.Context, actorID string, input ListWorkspaceInvitationsInput) (domain.WorkspaceInvitationList, error) {
+	status := input.Status
+	if status == "" {
+		status = domain.WorkspaceInvitationStatusFilterAll
+	}
+	switch status {
+	case domain.WorkspaceInvitationStatusFilterAll,
+		domain.WorkspaceInvitationStatusFilterPending,
+		domain.WorkspaceInvitationStatusFilterAccepted,
+		domain.WorkspaceInvitationStatusFilterRejected,
+		domain.WorkspaceInvitationStatusFilterCancelled:
+	default:
+		return domain.WorkspaceInvitationList{}, fmt.Errorf("%w: invalid status", domain.ErrValidation)
+	}
+
+	limit := input.Limit
+	switch {
+	case limit < 0:
+		limit = 50
+	case limit == 0 || limit > 100:
+		return domain.WorkspaceInvitationList{}, fmt.Errorf("%w: invalid limit", domain.ErrValidation)
+	}
+
+	membership, err := s.workspaces.GetMembershipByUserID(ctx, input.WorkspaceID, actorID)
+	if err != nil {
+		return domain.WorkspaceInvitationList{}, err
+	}
+	if membership.Role != domain.RoleOwner {
+		return domain.WorkspaceInvitationList{}, domain.ErrForbidden
+	}
+
+	return s.workspaces.ListWorkspaceInvitations(ctx, input.WorkspaceID, status, limit, strings.TrimSpace(input.Cursor))
+}
+
+func (s WorkspaceService) ListMyInvitations(ctx context.Context, actorID string, input ListMyInvitationsInput) (domain.WorkspaceInvitationList, error) {
+	user, err := s.users.GetByID(ctx, actorID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.WorkspaceInvitationList{}, domain.ErrUnauthorized
+		}
+		return domain.WorkspaceInvitationList{}, err
+	}
+
+	status := input.Status
+	if status == "" {
+		status = domain.WorkspaceInvitationStatusFilterAll
+	}
+	switch status {
+	case domain.WorkspaceInvitationStatusFilterAll,
+		domain.WorkspaceInvitationStatusFilterPending,
+		domain.WorkspaceInvitationStatusFilterAccepted,
+		domain.WorkspaceInvitationStatusFilterRejected,
+		domain.WorkspaceInvitationStatusFilterCancelled:
+	default:
+		return domain.WorkspaceInvitationList{}, fmt.Errorf("%w: invalid status", domain.ErrValidation)
+	}
+
+	limit := input.Limit
+	switch {
+	case limit < 0:
+		limit = 50
+	case limit == 0 || limit > 100:
+		return domain.WorkspaceInvitationList{}, fmt.Errorf("%w: invalid limit", domain.ErrValidation)
+	}
+
+	return s.workspaces.ListMyInvitations(ctx, user.Email, status, limit, strings.TrimSpace(input.Cursor))
 }
 
 func (s WorkspaceService) ListMembers(ctx context.Context, actorID, workspaceID string) ([]domain.WorkspaceMember, error) {
@@ -246,21 +462,18 @@ func (s WorkspaceService) UpdateMemberRole(ctx context.Context, actorID string, 
 		return domain.WorkspaceMember{}, domain.ErrForbidden
 	}
 
-	targetMembers, err := s.workspaces.ListMembers(ctx, input.WorkspaceID)
+	targetMember, err := s.workspaces.GetMembershipByID(ctx, input.WorkspaceID, input.MemberID)
 	if err != nil {
 		return domain.WorkspaceMember{}, err
 	}
 
-	for _, member := range targetMembers {
-		if member.ID == input.MemberID && member.Role == domain.RoleOwner && input.Role != domain.RoleOwner {
-			ownerCount, err := s.workspaces.CountOwners(ctx, input.WorkspaceID)
-			if err != nil {
-				return domain.WorkspaceMember{}, err
-			}
-			if ownerCount <= 1 {
-				return domain.WorkspaceMember{}, domain.ErrLastOwnerRemoval
-			}
-			break
+	if targetMember.Role == domain.RoleOwner && input.Role != domain.RoleOwner {
+		ownerCount, err := s.workspaces.CountOwners(ctx, input.WorkspaceID)
+		if err != nil {
+			return domain.WorkspaceMember{}, err
+		}
+		if ownerCount <= 1 {
+			return domain.WorkspaceMember{}, domain.ErrLastOwnerRemoval
 		}
 	}
 

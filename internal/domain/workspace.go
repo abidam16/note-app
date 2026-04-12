@@ -10,6 +10,25 @@ const (
 	RoleViewer WorkspaceRole = "viewer"
 )
 
+type WorkspaceInvitationStatus string
+
+const (
+	WorkspaceInvitationStatusPending   WorkspaceInvitationStatus = "pending"
+	WorkspaceInvitationStatusAccepted  WorkspaceInvitationStatus = "accepted"
+	WorkspaceInvitationStatusRejected  WorkspaceInvitationStatus = "rejected"
+	WorkspaceInvitationStatusCancelled WorkspaceInvitationStatus = "cancelled"
+)
+
+type WorkspaceInvitationStatusFilter string
+
+const (
+	WorkspaceInvitationStatusFilterAll       WorkspaceInvitationStatusFilter = "all"
+	WorkspaceInvitationStatusFilterPending   WorkspaceInvitationStatusFilter = "pending"
+	WorkspaceInvitationStatusFilterAccepted  WorkspaceInvitationStatusFilter = "accepted"
+	WorkspaceInvitationStatusFilterRejected  WorkspaceInvitationStatusFilter = "rejected"
+	WorkspaceInvitationStatusFilterCancelled WorkspaceInvitationStatusFilter = "cancelled"
+)
+
 func IsValidWorkspaceRole(role WorkspaceRole) bool {
 	switch role {
 	case RoleOwner, RoleEditor, RoleViewer:
@@ -36,11 +55,29 @@ type WorkspaceMember struct {
 }
 
 type WorkspaceInvitation struct {
-	ID          string        `json:"id"`
-	WorkspaceID string        `json:"workspace_id"`
-	Email       string        `json:"email"`
-	Role        WorkspaceRole `json:"role"`
-	InvitedBy   string        `json:"invited_by"`
-	AcceptedAt  *time.Time    `json:"accepted_at,omitempty"`
-	CreatedAt   time.Time     `json:"created_at"`
+	ID          string                    `json:"id"`
+	WorkspaceID string                    `json:"workspace_id"`
+	Email       string                    `json:"email"`
+	Role        WorkspaceRole             `json:"role"`
+	InvitedBy   string                    `json:"invited_by"`
+	AcceptedAt  *time.Time                `json:"accepted_at,omitempty"`
+	CreatedAt   time.Time                 `json:"created_at"`
+	Status      WorkspaceInvitationStatus `json:"status"`
+	Version     int64                     `json:"version"`
+	UpdatedAt   time.Time                 `json:"updated_at"`
+	RespondedBy *string                   `json:"responded_by,omitempty"`
+	RespondedAt *time.Time                `json:"responded_at,omitempty"`
+	CancelledBy *string                   `json:"cancelled_by,omitempty"`
+	CancelledAt *time.Time                `json:"cancelled_at,omitempty"`
+}
+
+type WorkspaceInvitationList struct {
+	Items      []WorkspaceInvitation `json:"items"`
+	NextCursor *string               `json:"next_cursor,omitempty"`
+	HasMore    bool                  `json:"has_more"`
+}
+
+type AcceptInvitationResult struct {
+	Invitation WorkspaceInvitation `json:"invitation"`
+	Membership WorkspaceMember     `json:"membership"`
 }

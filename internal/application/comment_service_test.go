@@ -159,3 +159,36 @@ func TestCommentServiceRejectsInvalidBodyViewerResolveAndMissingResources(t *tes
 		t.Fatalf("expected not found error, got %v", err)
 	}
 }
+
+func TestCommentServiceHidesForeignWorkspaceResources(t *testing.T) {
+	memberships := &fakeWorkspaceRepo{memberships: map[string][]domain.WorkspaceMember{
+		"workspace-1": {
+			{ID: "member-1", WorkspaceID: "workspace-1", UserID: "viewer-1", Role: domain.RoleViewer},
+		},
+	}, invitations: map[string]domain.WorkspaceInvitation{}, owners: map[string]int{}}
+	pages := &fakePageRepo{
+		pages: map[string]domain.Page{
+			"page-1": {ID: "page-1", WorkspaceID: "workspace-1", Title: "Doc"},
+		},
+		drafts: map[string]domain.PageDraft{
+			"page-1": {PageID: "page-1"},
+		},
+	}
+	now := time.Now().UTC()
+	comments := &fakeCommentRepo{comments: map[string]domain.PageComment{
+		"comment-1": {ID: "comment-1", PageID: "page-1", Body: "hello", CreatedBy: "viewer-1", CreatedAt: now},
+	}, ordered: []domain.PageComment{
+		{ID: "comment-1", PageID: "page-1", Body: "hello", CreatedBy: "viewer-1", CreatedAt: now},
+	}}
+	service := NewCommentService(comments, pages, memberships)
+
+	if _, err := service.CreateComment(context.Background(), "outsider-1", CreateCommentInput{PageID: "page-1", Body: "hello"}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected not found for foreign page comment create, got %v", err)
+	}
+	if _, err := service.ListComments(context.Background(), "outsider-1", "page-1"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected not found for foreign page comment list, got %v", err)
+	}
+	if _, err := service.ResolveComment(context.Background(), "outsider-1", ResolveCommentInput{CommentID: "comment-1"}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected not found for foreign comment resolve, got %v", err)
+	}
+}

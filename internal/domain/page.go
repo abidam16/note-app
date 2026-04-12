@@ -15,6 +15,14 @@ type Page struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type PageSummary struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	FolderID    *string   `json:"folder_id,omitempty"`
+	Title       string    `json:"title"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type PageDraft struct {
 	PageID       string          `json:"page_id"`
 	Content      json.RawMessage `json:"content"`
@@ -24,13 +32,7 @@ type PageDraft struct {
 	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
-type PageSearchResult struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	FolderID    *string   `json:"folder_id,omitempty"`
-	Title       string    `json:"title"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
+type PageSearchResult = PageSummary
 
 type TrashItem struct {
 	ID          string    `json:"id"`

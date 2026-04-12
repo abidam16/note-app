@@ -1,0 +1,31 @@
+{
+  "data": {
+    "items": [
+      {
+        "id": "d3f6d1f6-9f3c-4471-b8b3-4d6c8b0f9101",
+        "workspace_id": "9b2c1a1f-7c3e-4db7-a1e5-8dbd3b20d101",
+        "email": "carla.invitee@example.com",
+        "role": "editor",
+        "status": "pending",
+        "version": 3,
+        "invited_by": "11111111-1111-4111-8111-111111111111",
+        "created_at": "2026-04-10T09:05:00Z",
+        "updated_at": "2026-04-10T09:05:00Z",
+        "accepted_at": null
+      },
+      {
+        "id": "8d1db7cf-6c20-4a3d-9df7-4f25f3f5f203",
+        "workspace_id": "9b2c1a1f-7c3e-4db7-a1e5-8dbd3b20d101",
+        "email": "nina.qa@example.com",
+        "role": "viewer",
+        "status": "accepted",
+        "version": 5,
+        "invited_by": "11111111-1111-4111-8111-111111111111",
+        "created_at": "2026-04-06T11:20:00Z",
+        "updated_at": "2026-04-06T12:05:00Z",
+        "accepted_at": "2026-04-06T12:05:00Z"
+      }
+    ],
+    "has_more": false
+  }
+}

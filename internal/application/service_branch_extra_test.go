@@ -32,8 +32,11 @@ func TestFolderServiceListFoldersMembershipError(t *testing.T) {
 func TestWorkspaceServiceInviteErrorBranches(t *testing.T) {
 	notifErr := errors.New("notify failed")
 	svc := NewWorkspaceService(workspaceRepoStub{
-		getMembershipByUserIDFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
-			return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+		getMembershipByUserIDFn: func(_ context.Context, workspaceID, userID string) (domain.WorkspaceMember, error) {
+			if userID == "u1" {
+				return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+			}
+			return domain.WorkspaceMember{}, domain.ErrForbidden
 		},
 		getActiveInvitationByEmailFn: func(context.Context, string, string) (domain.WorkspaceInvitation, error) {
 			return domain.WorkspaceInvitation{}, errors.New("active invitation query failed")
@@ -47,8 +50,11 @@ func TestWorkspaceServiceInviteErrorBranches(t *testing.T) {
 	}
 
 	svc = NewWorkspaceService(workspaceRepoStub{
-		getMembershipByUserIDFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
-			return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+		getMembershipByUserIDFn: func(_ context.Context, workspaceID, userID string) (domain.WorkspaceMember, error) {
+			if userID == "u1" {
+				return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+			}
+			return domain.WorkspaceMember{}, domain.ErrForbidden
 		},
 		getActiveInvitationByEmailFn: func(context.Context, string, string) (domain.WorkspaceInvitation, error) {
 			return domain.WorkspaceInvitation{}, domain.ErrNotFound

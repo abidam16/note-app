@@ -11,8 +11,10 @@ import (
 )
 
 type fakeUserRepo struct {
-	byEmail map[string]domain.User
-	byID    map[string]domain.User
+	byEmail       map[string]domain.User
+	byID          map[string]domain.User
+	getByEmailErr error
+	getByIDErr    error
 }
 
 func (r *fakeUserRepo) Create(_ context.Context, user domain.User) (domain.User, error) {
@@ -25,6 +27,9 @@ func (r *fakeUserRepo) Create(_ context.Context, user domain.User) (domain.User,
 }
 
 func (r *fakeUserRepo) GetByEmail(_ context.Context, email string) (domain.User, error) {
+	if r.getByEmailErr != nil {
+		return domain.User{}, r.getByEmailErr
+	}
 	user, ok := r.byEmail[email]
 	if !ok {
 		return domain.User{}, domain.ErrNotFound
@@ -33,6 +38,9 @@ func (r *fakeUserRepo) GetByEmail(_ context.Context, email string) (domain.User,
 }
 
 func (r *fakeUserRepo) GetByID(_ context.Context, userID string) (domain.User, error) {
+	if r.getByIDErr != nil {
+		return domain.User{}, r.getByIDErr
+	}
 	user, ok := r.byID[userID]
 	if !ok {
 		return domain.User{}, domain.ErrNotFound

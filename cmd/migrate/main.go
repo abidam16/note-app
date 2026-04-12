@@ -11,14 +11,14 @@ import (
 )
 
 type migrateDeps struct {
-	loadConfig                          func() (config.Config, error)
+	loadConfig                          func(envFile string) (config.Config, error)
 	runMigrations                       func(dsn, migrationsPath, direction string, steps int) error
 	runFolderSiblingUniquenessPreflight func(dsn string) error
 }
 
 func defaultMigrateDeps() migrateDeps {
 	return migrateDeps{
-		loadConfig:                          config.Load,
+		loadConfig:                          config.LoadFromEnvFile,
 		runMigrations:                       database.RunMigrations,
 		runFolderSiblingUniquenessPreflight: database.RunFolderSiblingUniquenessPreflight,
 	}
@@ -28,6 +28,7 @@ func run(args []string, deps migrateDeps) error {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
+	envFile := fs.String("env-file", ".env", "environment file to load")
 	direction := fs.String("direction", "up", "migration direction: up or down")
 	steps := fs.Int("steps", 0, "number of steps for down migration, 0 means all")
 	preflight := fs.String("preflight", "", "optional preflight check target")
@@ -36,7 +37,7 @@ func run(args []string, deps migrateDeps) error {
 		return err
 	}
 
-	cfg, err := deps.loadConfig()
+	cfg, err := deps.loadConfig(*envFile)
 	if err != nil {
 		return err
 	}

@@ -16,14 +16,14 @@ type RestoreRevisionInput struct {
 }
 
 func (s RevisionService) RestoreRevision(ctx context.Context, actorID string, input RestoreRevisionInput) (RestoreRevisionResult, error) {
-	page, _, err := s.pages.GetByID(ctx, input.PageID)
+	page, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, input.PageID)
 	if err != nil {
 		return RestoreRevisionResult{}, err
 	}
 
 	membership, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID)
 	if err != nil {
-		return RestoreRevisionResult{}, err
+		return RestoreRevisionResult{}, hideForeignResourceMembershipError(err)
 	}
 	if membership.Role == domain.RoleViewer {
 		return RestoreRevisionResult{}, domain.ErrForbidden
@@ -44,6 +44,14 @@ func (s RevisionService) RestoreRevision(ctx context.Context, actorID string, in
 	draft, err := s.pages.UpdateDraft(ctx, input.PageID, cloneRawMessage(revision.Content), actorID, now)
 	if err != nil {
 		return RestoreRevisionResult{}, err
+	}
+	if s.threadAnchors != nil {
+		if err := s.threadAnchors.ReevaluatePageAnchors(ctx, input.PageID, draft.Content, domain.ThreadAnchorReevaluationContext{
+			Reason:     domain.PageCommentThreadEventReasonRevisionRestore,
+			RevisionID: &revision.ID,
+		}); err != nil {
+			return RestoreRevisionResult{}, err
+		}
 	}
 
 	restoreRevision := domain.Revision{

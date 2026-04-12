@@ -27,7 +27,7 @@ func chdirTemp(t *testing.T) string {
 func TestLoad(t *testing.T) {
 	chdirTemp(t)
 	t.Setenv("POSTGRES_DSN", "postgres://test:test@localhost:5432/test?sslmode=disable")
-	t.Setenv("JWT_SECRET", "super-secret-token")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("ACCESS_TOKEN_TTL", "10m")
 	t.Setenv("REFRESH_TOKEN_TTL", "24h")
 
@@ -44,18 +44,21 @@ func TestLoad(t *testing.T) {
 func TestLoadRequiresSecrets(t *testing.T) {
 	chdirTemp(t)
 	t.Setenv("POSTGRES_DSN", "")
+	t.Setenv("DATABASE_URL", "")
 	t.Setenv("JWT_SECRET", "")
 	os.Unsetenv("POSTGRES_DSN")
+	os.Unsetenv("DATABASE_URL")
 	os.Unsetenv("JWT_SECRET")
 
-	if _, err := Load(); err == nil {
-		t.Fatal("expected error when required env vars are missing")
+	if _, err := Load(); err == nil || err.Error() != "POSTGRES_DSN or DATABASE_URL is required" {
+		t.Fatalf("expected missing postgres env error, got %v", err)
 	}
 }
 
 func TestLoadRequiresJWTSecret(t *testing.T) {
 	chdirTemp(t)
 	t.Setenv("POSTGRES_DSN", "postgres://test:test@localhost:5432/test?sslmode=disable")
+	os.Unsetenv("DATABASE_URL")
 	os.Unsetenv("JWT_SECRET")
 
 	if _, err := Load(); err == nil || err.Error() != "JWT_SECRET is required" {
@@ -71,7 +74,12 @@ func TestLoadValidationAndLogLevel(t *testing.T) {
 		t.Fatal("expected short JWT secret to fail")
 	}
 
-	t.Setenv("JWT_SECRET", "super-secret-token")
+	t.Setenv("JWT_SECRET", strings.Repeat("a", 31))
+	if _, err := Load(); err == nil {
+		t.Fatal("expected JWT secret shorter than 32 chars to fail")
+	}
+
+	t.Setenv("JWT_SECRET", strings.Repeat("a", 32))
 	t.Setenv("ACCESS_TOKEN_TTL", "bad")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected invalid access token ttl to fail")
@@ -84,6 +92,25 @@ func TestLoadValidationAndLogLevel(t *testing.T) {
 	}
 
 	t.Setenv("REFRESH_TOKEN_TTL", "24h")
+	t.Setenv("TRUST_PROXY_HEADERS", "not-bool")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid trust proxy bool to fail")
+	}
+
+	t.Setenv("TRUST_PROXY_HEADERS", "true")
+	os.Unsetenv("TRUSTED_PROXY_CIDRS")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected missing trusted proxy cidrs to fail when proxy trust is enabled")
+	}
+
+	t.Setenv("TRUSTED_PROXY_CIDRS", "bad-cidr")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid trusted proxy cidr to fail")
+	}
+
+	t.Setenv("REFRESH_TOKEN_TTL", "24h")
+	t.Setenv("TRUST_PROXY_HEADERS", "false")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 192.168.0.0/16")
 	t.Setenv("APP_ENV", "development")
 	cfg, err := Load()
 	if err != nil {
@@ -92,10 +119,90 @@ func TestLoadValidationAndLogLevel(t *testing.T) {
 	if cfg.LogLevel() != slog.LevelDebug {
 		t.Fatalf("expected debug level in development, got %v", cfg.LogLevel())
 	}
+	if cfg.TrustProxyHeaders {
+		t.Fatalf("expected trust proxy headers false, got %+v", cfg)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 2 {
+		t.Fatalf("expected trusted proxy cidrs to be parsed, got %+v", cfg.TrustedProxyCIDRs)
+	}
 
 	cfg.AppEnv = "production"
 	if cfg.LogLevel() != slog.LevelInfo {
 		t.Fatalf("expected info level in production, got %v", cfg.LogLevel())
+	}
+}
+
+func TestLoadRejectsInsecureProductionPostgresDSN(t *testing.T) {
+	chdirTemp(t)
+	t.Setenv("JWT_SECRET", strings.Repeat("a", 32))
+	t.Setenv("ACCESS_TOKEN_TTL", "10m")
+	t.Setenv("REFRESH_TOKEN_TTL", "24h")
+	t.Setenv("APP_ENV", "production")
+
+	t.Setenv("POSTGRES_DSN", "postgres://test:test@db.internal:5432/test?sslmode=disable")
+	if _, err := Load(); err == nil || err.Error() != "production POSTGRES_DSN must enable TLS" {
+		t.Fatalf("expected production tls requirement, got %v", err)
+	}
+
+	t.Setenv("POSTGRES_DSN", "postgres://test:test@db.internal:5432/test?sslmode=prefer")
+	if _, err := Load(); err == nil || err.Error() != "production POSTGRES_DSN must not allow plaintext fallback" {
+		t.Fatalf("expected production fallback rejection, got %v", err)
+	}
+
+	t.Setenv("POSTGRES_DSN", "postgres://test:test@db.internal:5432/test?sslmode=allow")
+	if _, err := Load(); err == nil || err.Error() != "production POSTGRES_DSN must enable TLS" {
+		t.Fatalf("expected production allow rejection, got %v", err)
+	}
+
+	t.Setenv("POSTGRES_DSN", "postgres://test:test@db.internal:5432/test?sslmode=require")
+	if _, err := Load(); err != nil {
+		t.Fatalf("expected production require tls dsn to pass, got %v", err)
+	}
+}
+
+func TestParseEnvBoolAndSplitCSVEnv(t *testing.T) {
+	t.Setenv("BOOL_TEST", "true")
+	value, err := parseEnvBool("BOOL_TEST", false)
+	if err != nil || !value {
+		t.Fatalf("expected parseEnvBool true, got value=%t err=%v", value, err)
+	}
+
+	t.Setenv("BOOL_TEST", "broken")
+	if _, err := parseEnvBool("BOOL_TEST", false); err == nil {
+		t.Fatal("expected parseEnvBool invalid value to fail")
+	}
+
+	os.Unsetenv("CSV_TEST")
+	if got := splitCSVEnv("CSV_TEST"); got != nil {
+		t.Fatalf("expected nil for empty csv env, got %+v", got)
+	}
+
+	t.Setenv("CSV_TEST", "10.0.0.0/8, ,192.168.0.0/16")
+	got := splitCSVEnv("CSV_TEST")
+	if len(got) != 2 || got[0] != "10.0.0.0/8" || got[1] != "192.168.0.0/16" {
+		t.Fatalf("unexpected split csv env result: %+v", got)
+	}
+}
+
+func TestValidatePostgresDSNSecurity(t *testing.T) {
+	if err := validatePostgresDSNSecurity("development", "postgres://test:test@localhost:5432/test?sslmode=disable"); err != nil {
+		t.Fatalf("expected non-production dsn to skip strict validation, got %v", err)
+	}
+
+	if err := validatePostgresDSNSecurity("production", "::bad-dsn"); err == nil || !strings.Contains(err.Error(), "parse POSTGRES_DSN") {
+		t.Fatalf("expected parse error for invalid production dsn, got %v", err)
+	}
+
+	if err := validatePostgresDSNSecurity("production", "postgres://postgres.projectref:pass@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require"); err == nil || err.Error() != "production Supabase DATABASE_URL must not use transaction pool mode (:6543); use direct mode or Supavisor session mode (:5432) for persistent API traffic" {
+		t.Fatalf("expected supabase transaction pool rejection, got %v", err)
+	}
+
+	if err := validatePostgresDSNSecurity("production", "postgres://postgres.projectref:pass@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require"); err != nil {
+		t.Fatalf("expected supabase session pool mode to pass, got %v", err)
+	}
+
+	if err := validatePostgresDSNSecurity("production", "postgres://postgres:pass@db.projectref.supabase.co:5432/postgres?sslmode=require"); err != nil {
+		t.Fatalf("expected supabase direct connection to pass, got %v", err)
 	}
 }
 
@@ -116,7 +223,7 @@ func TestLoadReadsDotEnvFile(t *testing.T) {
 	os.Unsetenv("POSTGRES_DSN")
 	os.Unsetenv("JWT_SECRET")
 
-	dotenv := "POSTGRES_DSN=postgres://from-file:pass@localhost:5432/filedb?sslmode=disable\nJWT_SECRET=from-file-secret-123\n"
+	dotenv := "POSTGRES_DSN=postgres://from-file:pass@localhost:5432/filedb?sslmode=disable\nJWT_SECRET=0123456789abcdef0123456789abcdef\n"
 	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte(dotenv), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
 	}
@@ -128,17 +235,56 @@ func TestLoadReadsDotEnvFile(t *testing.T) {
 	if cfg.PostgresDSN != "postgres://from-file:pass@localhost:5432/filedb?sslmode=disable" {
 		t.Fatalf("unexpected dsn from .env: %s", cfg.PostgresDSN)
 	}
-	if cfg.JWTSecret != "from-file-secret-123" {
+	if cfg.JWTSecret != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("unexpected jwt secret from .env: %s", cfg.JWTSecret)
+	}
+}
+
+func TestLoadFromEnvFileReadsExplicitPath(t *testing.T) {
+	tmp := chdirTemp(t)
+	os.Unsetenv("POSTGRES_DSN")
+	os.Unsetenv("DATABASE_URL")
+	os.Unsetenv("JWT_SECRET")
+
+	dotenv := "POSTGRES_DSN=postgres://from-local-file:pass@localhost:5432/localdb?sslmode=disable\nJWT_SECRET=fedcba9876543210fedcba9876543210\n"
+	envPath := filepath.Join(tmp, ".env.local")
+	if err := os.WriteFile(envPath, []byte(dotenv), 0o600); err != nil {
+		t.Fatalf("write .env.local: %v", err)
+	}
+
+	cfg, err := LoadFromEnvFile(".env.local")
+	if err != nil {
+		t.Fatalf("LoadFromEnvFile() error = %v", err)
+	}
+	if cfg.PostgresDSN != "postgres://from-local-file:pass@localhost:5432/localdb?sslmode=disable" {
+		t.Fatalf("unexpected dsn from explicit env file: %s", cfg.PostgresDSN)
+	}
+	if cfg.JWTSecret != "fedcba9876543210fedcba9876543210" {
+		t.Fatalf("unexpected jwt secret from explicit env file: %s", cfg.JWTSecret)
+	}
+}
+
+func TestLoadUsesDatabaseURLFallback(t *testing.T) {
+	chdirTemp(t)
+	os.Unsetenv("POSTGRES_DSN")
+	t.Setenv("DATABASE_URL", "postgres://from-db-url:pass@localhost:5432/dburl?sslmode=disable")
+	t.Setenv("JWT_SECRET", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.PostgresDSN != "postgres://from-db-url:pass@localhost:5432/dburl?sslmode=disable" {
+		t.Fatalf("expected DATABASE_URL fallback, got %s", cfg.PostgresDSN)
 	}
 }
 
 func TestLoadDotEnvDoesNotOverrideExistingEnv(t *testing.T) {
 	tmp := chdirTemp(t)
 	t.Setenv("POSTGRES_DSN", "postgres://from-env:pass@localhost:5432/envdb?sslmode=disable")
-	t.Setenv("JWT_SECRET", "from-env-secret-123")
+	t.Setenv("JWT_SECRET", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
-	dotenv := "POSTGRES_DSN=postgres://from-file:pass@localhost:5432/filedb?sslmode=disable\nJWT_SECRET=from-file-secret-123\n"
+	dotenv := "POSTGRES_DSN=postgres://from-file:pass@localhost:5432/filedb?sslmode=disable\nJWT_SECRET=0123456789abcdef0123456789abcdef\n"
 	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte(dotenv), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
 	}
@@ -150,7 +296,7 @@ func TestLoadDotEnvDoesNotOverrideExistingEnv(t *testing.T) {
 	if cfg.PostgresDSN != "postgres://from-env:pass@localhost:5432/envdb?sslmode=disable" {
 		t.Fatalf("expected env dsn to win, got %s", cfg.PostgresDSN)
 	}
-	if cfg.JWTSecret != "from-env-secret-123" {
+	if cfg.JWTSecret != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("expected env secret to win, got %s", cfg.JWTSecret)
 	}
 }

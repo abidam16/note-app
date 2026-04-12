@@ -45,3 +45,23 @@ func TestValidateDocumentAdditionalSuccessCases(t *testing.T) {
 		t.Fatalf("expected valid complex document, got %v", err)
 	}
 }
+
+func TestValidateDocumentThreadAnchorsReady(t *testing.T) {
+	valid := `[
+		{"id":"block-1","type":"paragraph","children":[{"type":"text","text":"Hello"}]},
+		{"id":"block-2","type":"heading","level":2,"children":[{"type":"text","text":"World"}]}
+	]`
+	if err := ValidateDocumentThreadAnchorsReady([]byte(valid)); err != nil {
+		t.Fatalf("expected thread-anchor-ready document, got %v", err)
+	}
+
+	missingID := `[{"type":"paragraph","children":[{"type":"text","text":"Hello"}]}]`
+	if err := ValidateDocumentThreadAnchorsReady([]byte(missingID)); err == nil {
+		t.Fatal("expected missing block id to fail")
+	}
+
+	blankID := `[{"id":"   ","type":"paragraph","children":[{"type":"text","text":"Hello"}]}]`
+	if err := ValidateDocumentThreadAnchorsReady([]byte(blankID)); err == nil {
+		t.Fatal("expected blank block id to fail")
+	}
+}

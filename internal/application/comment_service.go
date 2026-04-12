@@ -51,12 +51,8 @@ func NewCommentService(comments CommentRepository, pages CommentPageRepository, 
 }
 
 func (s CommentService) CreateComment(ctx context.Context, actorID string, input CreateCommentInput) (domain.PageComment, error) {
-	page, _, err := s.pages.GetByID(ctx, input.PageID)
+	page, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, input.PageID)
 	if err != nil {
-		return domain.PageComment{}, err
-	}
-
-	if _, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID); err != nil {
 		return domain.PageComment{}, err
 	}
 
@@ -88,16 +84,12 @@ func (s CommentService) CreateComment(ctx context.Context, actorID string, input
 }
 
 func (s CommentService) ListComments(ctx context.Context, actorID, pageID string) ([]domain.PageComment, error) {
-	page, _, err := s.pages.GetByID(ctx, pageID)
+	page, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, pageID)
 	if err != nil {
 		return nil, err
 	}
 
-	if _, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID); err != nil {
-		return nil, err
-	}
-
-	return s.comments.ListByPageID(ctx, pageID)
+	return s.comments.ListByPageID(ctx, page.ID)
 }
 
 func (s CommentService) ResolveComment(ctx context.Context, actorID string, input ResolveCommentInput) (domain.PageComment, error) {
@@ -106,14 +98,14 @@ func (s CommentService) ResolveComment(ctx context.Context, actorID string, inpu
 		return domain.PageComment{}, err
 	}
 
-	page, _, err := s.pages.GetByID(ctx, comment.PageID)
+	page, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, comment.PageID)
 	if err != nil {
 		return domain.PageComment{}, err
 	}
 
 	membership, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID)
 	if err != nil {
-		return domain.PageComment{}, err
+		return domain.PageComment{}, hideForeignResourceMembershipError(err)
 	}
 	if membership.Role == domain.RoleViewer {
 		return domain.PageComment{}, domain.ErrForbidden

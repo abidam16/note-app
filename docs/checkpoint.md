@@ -4,37 +4,1166 @@
 This section supersedes older references below if they differ.
 
 Current completed feature:
-- Post-roadmap extension: workspace and folder rename with folder sibling-name uniqueness
+- Invitation roadmap Task 28 complete: concurrency and load verification added with PostgreSQL race tests for invitation update/cancel conflicts, application projector replay and retry/idempotency coverage, DB-backed notification replay idempotency coverage, focused HTTP stale-version conflict regression, and load benchmarks plus verification docs
+- Invitation roadmap Task 27 complete: `go run ./cmd/notification-reconcile` now performs internal notification reconciliation with `-dry-run`, optional `-workspace-id` scope, bounded batch size, one-run advisory locking, cutoff-based source scanning, managed invitation/comment/mention repair, exact unread-counter rebuilds, best-effort post-repair invalidation publishing that never fails the run on publish errors, and now-registered-invitee backfill for missed live invitation notifications
+- Invitation roadmap Task 26 complete: `GET /api/v1/notifications/stream` now streams SSE `snapshot`, `unread_count`, and `inbox_invalidated` events for authenticated users, uses PostgreSQL `LISTEN/NOTIFY` for best-effort cross-instance invalidation, keeps REST inbox/unread-count endpoints as the source of truth, bypasses the normal 30s request timeout for the stream route, and sets HTTP server `WriteTimeout` to `0` so long-lived SSE connections are not killed
+- Invitation roadmap Task 25 complete: `PUT /api/v1/threads/{threadID}/notification-preference` now lets a thread member persist sparse per-thread notification mode state with `all|mentions_only|mute`, deletes stored rows for `all`, preserves existing thread visibility 404-hiding rules, and returns `{thread_id, mode, updated_at}`
+- Invitation roadmap Task 24 complete: `GET /api/v1/threads/{threadID}/notification-preference` now returns the actor's effective per-thread notification mode with sparse storage backing, defaults to `all` when no row exists, and preserves the existing thread visibility 404-hiding rules
+- Invitation roadmap Task 23 complete: explicit mention targets from `thread_created` and `thread_reply_created` outbox events now project asynchronously into append-only `mention` inbox rows for current workspace members only, alongside comment notifications when applicable, with idempotent retry-safe inserts, atomic shared projection persistence, unread counter maintenance, and malformed mention payloads blocked before any notification projection
+- Invitation roadmap Task 22 complete: `POST /api/v1/threads/{threadID}/replies` now accepts optional reply-message `mentions`, normalizes and validates them against workspace members, persists `page_comment_message_mentions` transactionally for the reply message, and includes `mention_user_ids` in the `thread_reply_created` outbox payload while keeping the reply response DTO unchanged
+- Invitation roadmap Task 21 complete: `POST /api/v1/pages/{pageID}/threads` now accepts optional starter-message mentions, normalizes and validates them against workspace members, persists `page_comment_message_mentions` transactionally, and includes `mention_user_ids` in the `thread_created` outbox payload while keeping the create-thread response shape unchanged
+- Invitation roadmap Task 20 complete: schema-only mention foundation now adds `page_comment_message_mentions` with composite primary key and supporting index, while keeping public API response DTOs unchanged
+- Invitation roadmap Task 19 complete: comment notifications now project asynchronously from `thread_created` and `thread_reply_created` outbox events into append-only `comment` inbox rows for relevant users only
+- Invitation roadmap Task 18 complete: `POST /api/v1/threads/{threadID}/replies` now writes a single `thread_reply_created` outbox event transactionally with the reply, preserves auto-reopen behavior, and no longer depends on synchronous reply fanout
+- Invitation roadmap Task 17 complete: page-thread create now records a `thread_created` outbox event transactionally, persists thread/message/event/outbox rows in one transaction, and no longer depends on synchronous create-path notification fanout
+- Invitation roadmap Task 16 complete: relevant-user thread notification delivery now resolves only thread creator, prior message authors, and explicit mention targets, excludes the actor and non-members, dedupes in first-seen order, and allows create-thread flows with no mentions to emit zero notifications
+- Invitation roadmap Task 15 complete: `POST /api/v1/notifications/read` now batch-marks notifications read with atomic all-or-nothing ownership checks, idempotent repeated reads, and response payload `{updated_count, unread_count}`
+- Tooling update complete: stable race-test scripts now pin the working Windows UCRT64 toolchain for backend tests
+- Invitation roadmap Task 14 complete: unread-count endpoint and storage-backed counter maintenance
+- Invitation roadmap Task 13 complete: mark-notification-read now returns the inbox item DTO
+- Invitation roadmap Task 12 complete: `GET /api/v1/notifications` now returns the canonical inbox page DTO
+- Invitation roadmap Task 11 complete: invitation outbox events now project into one live notification row per invitation
+- Invitation roadmap Task 10 complete: transactional outbox foundation with durable claim/retry/dead-letter repository semantics
+- Invitation roadmap Task 9 complete: notification schema v2 foundation with backward-compatible repository and producer writes
+- Invitation roadmap Task 8 complete: version-aware invitation cancel endpoint now returns cancelled invitation state
+- Invitation roadmap Task 7 complete: version-aware invitation reject endpoint now returns rejected invitation state
+- Invitation roadmap Task 6 complete: version-aware invitation accept endpoint now returns accepted invitation state plus created membership
+- Invitation roadmap Task 5 complete: owner-only in-place invitation role update with version-based concurrency protection
+- Invitation roadmap Task 4 complete: authenticated user invitation listing across workspaces with status filter and cursor pagination
+- Invitation roadmap Task 3 complete: owner-only workspace invitation listing with status filter and cursor pagination
+- Invitation roadmap Task 2 complete: create-invitation endpoint now exposes invitation state fields publicly and rejects inviting an email that already belongs to a workspace member
+- Create-thread responses now always return `events` as an array, including the persisted `created` event
+- API contract now explicitly documents that thread-create responses include `events[0]` as the `created` event
+- Draft save now enforces stable block ids for thread anchors
+- Railway + Supabase deployment hardening slice complete
+- Legacy threaded-discussion backend scope remains recorded below for historical reference
+- Cyber security roadmap Task 9 complete: security verification pass
+- Cyber security roadmap Task 8 complete: authorization defense-in-depth review
+- Cyber security roadmap Task 7 complete: password policy and credential lifecycle review
+- Cyber security roadmap Task 6 complete: authentication abuse and account-enumeration review
+- Cyber security roadmap Task 5 complete: database connection security hardening
+- Cyber security roadmap Task 4 complete: HTTP transport header hardening
+- Cyber security roadmap Task 3 complete: trusted proxy and IP-based limiter hardening
+- Cyber security roadmap Task 2 complete: resource existence leak reduction
+- Backend hardening Task 1 complete: server socket hardening
+- Backend hardening Task 2 complete: JSON body size caps
+- Backend hardening Task 3 complete: global rate limiting
+- Backend hardening Task 4 complete: auth route throttling
+- Backend hardening Task 5 complete: overload shedding for expensive routes
+- Backend hardening Task 6 complete: verification pass
 
 Current next strict roadmap feature:
-- None (backend roadmap complete through feature 23)
+- Invitation roadmap execution checklist complete for current scope
+- Older threaded-discussion roadmap notes below are superseded by the invitation-notification execution checklist and this latest-update section
+- Backend hardening roadmap complete for current scope
+- Security and error hardening roadmap created:
+  - `docs/security-error-hardening-roadmap.md`
+  - Task 6 complete, roadmap scope now complete
+- Cyber security roadmap created:
+  - `docs/cyber-security-roadmap.md`
+  - Task 1 complete: token and secret hardening
+  - Task 2 complete: resource existence leak reduction
+  - Task 3 complete: trusted proxy and IP-based limiter hardening
+  - Task 4 complete: HTTP transport header hardening
+  - Task 5 complete: database connection security hardening
+  - Task 6 complete: authentication abuse and account-enumeration review
+  - Task 7 complete: password policy and credential lifecycle review
+  - Task 8 complete: authorization defense-in-depth review
+  - Task 9 complete: security verification pass
+  - cybersecurity roadmap scope complete for current code-level tasks
 
 What was completed in this session:
-- Added workspace rename endpoint:
-  - `PATCH /api/v1/workspaces/{workspaceID}` (`owner` only)
-- Added folder rename endpoint:
-  - `PATCH /api/v1/folders/{folderID}` (`owner|editor`)
-- Added backend service/repository support for workspace and folder rename
-- Enforced folder sibling-name uniqueness for both folder creation and folder rename
-- Added migration:
-  - `migrations/000009_folder_sibling_uniqueness.up.sql`
-  - `migrations/000009_folder_sibling_uniqueness.down.sql`
-- Added preflight support for migration rollout:
-  - `go run ./cmd/migrate -preflight folder-sibling-uniqueness`
-  - migration `000009` now fails with a clear duplicate-data message if preflight is skipped
-- Updated docs/contracts:
+- Completed invitation roadmap Task 26:
+  - added `GET /api/v1/notifications/stream` as an authenticated SSE endpoint
+  - stream emits `snapshot`, `unread_count`, and `inbox_invalidated` events
+  - stream uses PostgreSQL `LISTEN/NOTIFY` for best-effort invalidation fanout
+  - notification writes now publish user-scoped invalidation signals only after successful commits, and publish failures do not fail successful writes
+  - the stream route bypasses the normal 30s request timeout middleware, and the HTTP server `WriteTimeout` is now `0`
+  - updated:
+    - `internal/application/notification_stream.go`
+    - `internal/application/notification_stream_test.go`
+    - `internal/infrastructure/database/notification_stream.go`
+    - `internal/infrastructure/database/notification_stream_test.go`
+    - `internal/repository/postgres/notification_repository.go`
+    - `internal/repository/postgres/content_repository_test.go`
+    - `internal/transport/http/handlers.go`
+    - `internal/transport/http/server.go`
+    - `internal/transport/http/sse.go`
+    - `internal/transport/http/notifications_stream_test.go`
+    - `cmd/api/app.go`
+    - `cmd/api/app_test.go`
+    - `frontend-repo/API_CONTRACT.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "TestNotificationStreamServiceOpen" -count=1`
+    - `go test ./internal/infrastructure/database -run "TestPostgresNotificationStreamBroker" -count=1`
+    - `go test ./internal/repository/postgres -run "TestNotificationRepositoryPublishesStreamInvalidationsIntegration" -count=1`
+    - `go test ./internal/transport/http -run "TestNotificationStreamEndpoint" -count=1`
+    - `go test ./cmd/api -run "TestBuildDefaultServer" -count=1`
+- Completed invitation roadmap Task 25:
+  - added `PUT /api/v1/threads/{threadID}/notification-preference`
+  - request body now accepts:
+    - `mode`
+  - per-thread notification preference writes now:
+    - trim and validate `mode`
+    - accept only `all`, `mentions_only`, or `mute`
+    - reuse existing thread visibility rules so non-members, inaccessible threads, and trashed-page threads stay hidden as `404`
+    - delete stored preference rows for `mode = all`
+    - upsert stored preference rows for `mode = mentions_only` and `mode = mute`
+    - return `{thread_id, mode, updated_at}` in the standard success envelope
+  - sparse storage now remains the only persisted representation:
+    - no row is stored for the effective default `all`
+    - repeated `all` requests remain harmless no-ops
+  - updated:
+    - `internal/application/thread_notification_preferences.go`
+    - `internal/application/thread_service_test.go`
+    - `internal/domain/thread.go`
+    - `internal/repository/postgres/thread_notification_preferences.go`
+    - `internal/repository/postgres/thread_notification_preferences_test.go`
+    - `internal/transport/http/handlers.go`
+    - `internal/transport/http/server.go`
+    - `internal/transport/http/server_test.go`
+    - `internal/transport/http/server_invalid_json_test.go`
+    - `frontend-repo/API_CONTRACT.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "TestThreadService(UpdateNotificationPreference|GetNotificationPreference)|TestThreadNotificationPreference" -count=1`
+    - `go test ./internal/repository/postgres -run "TestThreadNotificationPreferenceRepositoryIntegration|TestThreadNotificationPreferenceRepositoryValidation|TestRepositoriesReturnErrorsWhenPoolClosed" -count=1`
+    - `go test ./internal/transport/http -run "TestThreadNotificationPreferenceEndpoint|TestThreadNotificationPreferenceEndpointRejectsInvalidMode|TestHandlersInvalidJSONBranches" -count=1`
+    - `go test -p 1 ./internal/application ./internal/repository/postgres ./internal/transport/http -count=1`
+    - `powershell -ExecutionPolicy Bypass -File .\\scripts\\test-race.ps1`
+- Completed invitation roadmap Task 24:
+  - `GET /api/v1/threads/{threadID}/notification-preference` now reads the actor's stored per-thread notification mode or returns the default effective mode `all`
+  - the storage foundation is sparse: no row is created on read, and the preference table is only used when a later write task stores a mode
+  - thread visibility and resource hiding stay consistent with the existing thread detail path, so non-members and trashed/inaccessible threads still return `404`
+  - updated:
+    - `internal/domain/thread.go`
+    - `internal/application/thread_service.go`
+    - `internal/application/thread_notification_preferences.go`
+    - `internal/application/thread_service_test.go`
+    - `internal/repository/postgres/thread_notification_preferences.go`
+    - `internal/repository/postgres/thread_notification_preferences_test.go`
+    - `internal/repository/postgres/integration_test.go`
+    - `internal/repository/postgres/closed_pool_errors_test.go`
+    - `internal/transport/http/handlers.go`
+    - `internal/transport/http/server.go`
+    - `internal/transport/http/server_test.go`
+    - `cmd/api/app.go`
+    - `migrations/000024_thread_notification_preferences.up.sql`
+    - `migrations/000024_thread_notification_preferences.down.sql`
+    - `frontend-repo/API_CONTRACT.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "TestThread(ServiceGetNotificationPreference|NotificationPreference)" -count=1`
+    - `go test ./internal/repository/postgres -run "Test(ThreadNotificationPreferenceRepositoryIntegration|RepositoriesReturnErrorsWhenPoolClosed)" -count=1`
+    - `go test ./internal/transport/http -run "TestThreadNotificationPreferenceEndpoint" -count=1`
+    - `go test -p 1 ./internal/application ./internal/repository/postgres ./internal/transport/http -count=1`
+    - `powershell -ExecutionPolicy Bypass -File .\scripts\test-race.ps1`
+- Completed invitation roadmap Task 23:
+  - explicit mention targets from existing `thread_created` and `thread_reply_created` outbox events now project asynchronously into append-only `mention` inbox rows for current workspace members only
+  - mention projection runs inside the shared thread-event projector path before an outbox row is marked processed, and comment plus mention notifications now commit together through one combined repository transaction
+  - mention notification inserts are idempotent on `(user_id, type, event_id)` and unread counters only increase for newly inserted rows
+  - malformed `mention_user_ids` payload shapes dead-letter the outbox row before any comment or mention notifications are inserted, while omitted `mention_user_ids` are treated as empty
+  - updated:
+    - `internal/application/comment_notification_projector.go`
+    - `internal/application/comment_notification_projector_test.go`
+    - `internal/application/mention_notification_projector.go`
+    - `internal/application/mention_notification_projector_test.go`
+    - `internal/repository/postgres/notification_repository.go`
+    - `internal/repository/postgres/content_repository_test.go`
+    - `internal/repository/postgres/closed_pool_errors_test.go`
+    - `frontend-repo/API_CONTRACT.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "Test(CommentNotificationProjector|MentionNotificationProjector)" -count=1`
+    - `go test ./internal/repository/postgres -run "TestRevisionCommentNotificationRepositoriesIntegration|TestRepositoriesReturnErrorsWhenPoolClosed|TestNotificationRepositoryMentionNotificationsIntegration" -count=1`
+    - `go test ./internal/repository/postgres -run "TestNotificationRepositoryCombinedCommentMentionNotificationsAtomicityIntegration" -count=1`
+    - `go test -p 1 ./internal/application ./internal/repository/postgres ./internal/transport/http -count=1`
+    - `powershell -ExecutionPolicy Bypass -File .\scripts\test-race.ps1`
+- Completed invitation roadmap Task 21:
+  - `POST /api/v1/pages/{pageID}/threads` now accepts optional starter-message `mentions`
+  - mentions are normalized in the application layer by trimming, rejecting blanks, deduping in first-seen order, and enforcing a maximum of 20 unique ids
+  - mentions are validated against current workspace members, with self-mentions allowed
+  - starter-message mention rows are persisted in the same transaction as thread creation
+  - `thread_created` outbox payload now includes `mention_user_ids` and always emits an array, even when empty
+  - public create-thread response shape remains unchanged and mention data is not exposed in thread detail
+  - updated:
+    - `internal/application/thread_mentions.go`
+    - `internal/application/thread_mentions_test.go`
+    - `internal/application/thread_service.go`
+    - `internal/application/thread_service_test.go`
+    - `internal/domain/outbox.go`
+    - `internal/repository/postgres/thread_repository.go`
+    - `internal/repository/postgres/content_repository_test.go`
+    - `internal/repository/postgres/closed_pool_errors_test.go`
+    - `internal/transport/http/handlers.go`
+    - `internal/transport/http/server_test.go`
+    - `cmd/api/app.go`
+    - `frontend-repo/API_CONTRACT.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "TestNormalizeThreadMentionUserIDs|TestValidateThreadMentionUserIDs|TestThreadServiceCreateThreadWithMentions|TestThreadServiceCreateThreadRejectsInvalidMentions|TestThreadServiceCreateThread" -count=1`
+    - `go test ./internal/repository/postgres -run "TestRevisionCommentNotificationRepositoriesIntegration|TestPageCommentMessageMentionSchemaIntegration|TestRepositoriesReturnErrorsWhenPoolClosed" -count=1`
+    - `go test ./internal/transport/http -run "TestThreadCreateEndpoint|TestThreadCreateResolveAndReopenReturnNotFoundWhenPageIsTrashed|TestThreadDetailEndpoint|TestThreadListEndpoint" -count=1`
+    - `go test ./cmd/api -count=1`
+    - `go test ./... -count=1`
+- Completed invitation roadmap Task 19:
+  - added `internal/application/comment_notification_projector.go` for asynchronous comment notification projection from `thread_created` and `thread_reply_created`
+  - projector now claims only thread-comment topics from the outbox, loads canonical thread detail, reuses the relevant-user resolver, and creates append-only `comment` inbox rows for distinct recipients
+  - projector treats malformed payloads, unsupported topics, invalid mention arrays, and missing threads as dead-letter cases
+  - repository now supports `CreateCommentNotifications` with idempotent `(user_id, type, event_id)` inserts and unread-counter updates only for newly inserted rows
+  - added focused projector, repository, and closed-pool regression coverage
+  - updated:
+    - `internal/application/comment_notification_projector.go`
+    - `internal/application/comment_notification_projector_test.go`
+    - `internal/repository/postgres/notification_repository.go`
+    - `internal/repository/postgres/content_repository_test.go`
+    - `internal/repository/postgres/closed_pool_errors_test.go`
+    - `frontend-repo/API_CONTRACT.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "TestCommentNotificationProjector" -count=1`
+    - `go test ./internal/repository/postgres -run "TestRevisionCommentNotificationRepositoriesIntegration|TestRepositoriesReturnErrorsWhenPoolClosed" -count=1`
+- Completed invitation roadmap Task 18:
+  - `POST /api/v1/threads/{threadID}/replies` now builds a single `thread_reply_created` outbox event with explicit payload fields for:
+    - `thread_id`
+    - `message_id`
+    - `page_id`
+    - `workspace_id`
+    - `actor_id`
+    - `occurred_at`
+  - thread reply now persists:
+    - thread update
+    - reply message row
+    - reopened thread event row when needed
+    - replied thread event row
+    - outbox row
+  - outbox insert failure now rolls back the entire reply transaction
+  - synchronous reply-path notification fanout was removed
+  - auto-reopen behavior remains unchanged
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+    - `internal/application/thread_service.go`
+    - `internal/application/thread_service_test.go`
+    - `internal/application/notification_events.go`
+    - `internal/application/notification_service.go`
+    - `internal/application/notification_service_test.go`
+    - `internal/application/notification_service_additional_test.go`
+    - `internal/repository/postgres/thread_repository.go`
+    - `internal/repository/postgres/content_repository_test.go`
+    - `internal/repository/postgres/closed_pool_errors_test.go`
+    - `internal/transport/http/server_test.go`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "Test(NotificationService|ThreadServiceCreateReply)" -count=1`
+    - `go test ./internal/repository/postgres -run "TestRevisionCommentNotificationRepositoriesIntegration|TestRepositoriesReturnErrorsWhenPoolClosed" -count=1`
+    - `go test ./internal/transport/http -run "TestThread(CreateEndpoint|ReplyEndpoint|EndpointsPropagateTransactionalFailures)" -count=1`
+- Completed invitation roadmap Task 17:
+  - `POST /api/v1/pages/{pageID}/threads` now builds a single `thread_created` outbox event with explicit payload fields for:
+    - `thread_id`
+    - `message_id`
+    - `page_id`
+    - `workspace_id`
+    - `actor_id`
+    - `occurred_at`
+  - thread creation now persists:
+    - thread row
+    - starter message row
+    - created thread event row
+    - outbox row
+  - outbox insert failure now rolls back the entire thread-create transaction
+  - synchronous create-path notification fanout was removed
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+    - `internal/application/thread_service.go`
+    - `internal/application/thread_service_test.go`
+    - `internal/repository/postgres/thread_repository.go`
+    - `internal/repository/postgres/outbox_repository.go`
+    - `internal/repository/postgres/content_repository_test.go`
+    - `internal/transport/http/server_test.go`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run TestThreadServiceCreateThread -count=1`
+    - `go test ./internal/repository/postgres -run "TestRevisionCommentNotificationRepositoriesIntegration|TestRepositoriesReturnErrorsWhenPoolClosed" -count=1`
+    - `go test ./internal/transport/http -run "TestThread(CreateEndpoint|EndpointsPropagateNotificationFailures)" -count=1`
+    - `go test ./... -count=1`
+- Completed invitation roadmap Task 15:
+  - added `POST /api/v1/notifications/read`
+  - request body now requires:
+    - `notification_ids`
+    - between `1` and `100` unique UUID ids
+  - batch mark-read now validates:
+    - authenticated actor still exists
+    - every requested id belongs to the authenticated actor
+  - batch mark-read now guarantees:
+    - atomic all-or-nothing ownership checks
+    - `404` when any requested id is missing or foreign
+    - idempotent repeated reads with `updated_count = 0` after the first successful transition
+    - transactionally maintained `unread_count` in the success response
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+- Added race-test tooling that does not depend on shell state:
+  - `scripts/test-race.ps1`
+  - `scripts/test-race.sh`
+  - `make test-race`
+- Windows race-test path now explicitly uses the MSYS2 UCRT64 toolchain and linker flags required on this machine
+- verified the backend race suite with the current configuration using:
+  - `go test -race -p 1 ./internal/application ./internal/repository/postgres ./internal/transport/http -count=1`
+  - repeated targeted race runs on the same package set
+- Completed invitation roadmap Task 14:
+  - added migration `000022_notification_unread_counters`
+  - added dedicated unread counter read model table:
+    - `notification_unread_counters`
+  - added `GET /api/v1/notifications/unread-count`
+  - successful unread-count responses now return:
+    - `unread_count`
+  - unread count service now validates:
+    - authenticated actor still exists
+  - unread-count repository now returns `0` when the actor has no counter row
+  - notification write paths now maintain unread counters transactionally for:
+    - single notification create
+    - batch notification create
+    - first unread-to-read transition
+    - invitation live notification insert
+  - unread counter maintenance now guarantees:
+    - duplicate notification inserts do not increment counters
+    - repeated mark-read does not double decrement
+    - live invitation updates preserve read state and do not increment counters
+  - notification inbox list now reads total `unread_count` from the dedicated counter table instead of scanning notification rows
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+- Completed invitation roadmap Task 13:
+  - upgraded `POST /api/v1/notifications/{notificationID}/read` to return the inbox item DTO
+  - mark-read service now validates:
+    - authenticated actor still exists
+    - `notificationID` is a valid UUID
+  - mark-read repository now returns:
+    - actor metadata
+    - title/content
+    - read state
+    - action metadata
+    - resource metadata
+    - payload
+    - created and updated timestamps
+  - repeated mark-read remains idempotent and preserves the original:
+    - `read_at`
+    - `updated_at`
+  - malformed ids and foreign notifications both return `404`
+  - no new unread-count behavior was added in this task
+- Completed invitation roadmap Task 12:
+  - redesigned `GET /api/v1/notifications` into the canonical inbox API
+  - added inbox query filters:
+    - `status=all|read|unread`
+    - `type=all|invitation|comment|mention`
+    - `limit`
+    - `cursor`
+  - response now returns:
+    - `items`
+    - `unread_count`
+    - `next_cursor`
+    - `has_more`
+  - public notification list items now expose:
+    - actor metadata
+    - title/content
+    - read state
+    - action metadata
+    - resource metadata
+    - payload
+    - created and updated timestamps
+  - notification inbox repository now supports:
+    - actor metadata join
+    - newest-first cursor pagination
+    - total unread count query
+    - cursor filter mismatch validation
+  - public list endpoint no longer returns raw `Notification[]`
+  - `POST /api/v1/notifications/{notificationID}/read` was intentionally left unchanged in this task
+- Completed invitation roadmap Task 11:
+  - added internal invitation notification projector batch processing
+  - projector now claims only invitation outbox topics:
+    - `invitation_created`
+    - `invitation_updated`
+    - `invitation_accepted`
+    - `invitation_rejected`
+    - `invitation_cancelled`
+  - invitation outbox events now project into one live notification row per invitation
+  - invitation notification updates preserve:
+    - existing notification `id`
+    - `created_at`
+    - `is_read`
+    - `read_at`
+  - malformed or unsupported invitation events now dead-letter with stored error text
+  - unregistered invitee events are marked processed without creating a notification row
+  - transient lookup or notification-write failures now schedule retry through the outbox repository
+  - added repository support for:
+    - `UpsertInvitationLive`
+    - topic-scoped outbox claims via `ClaimPendingByTopics`
+  - no public API contract changed in this task
+- Completed invitation roadmap Task 10:
+  - added migration `000021_outbox_events`
+  - introduced internal outbox domain model with explicit:
+    - topics
+    - aggregate types
+    - statuses
+    - retry and lease metadata
+  - added PostgreSQL outbox repository support for:
+    - create one event
+    - create many events
+    - claim pending events with `FOR UPDATE SKIP LOCKED`
+    - stale lease reclaim
+    - mark processed
+    - mark retry
+    - mark dead-letter
+  - schema and repository now enforce:
+    - globally unique `idempotency_key`
+    - JSON-object payload validation
+    - explicit pending, processing, processed, and dead-letter state rules
+  - no public API contract changed in this task
+  - added PostgreSQL integration and closed-pool regression coverage for the outbox repository
+- Completed invitation roadmap Task 9:
+  - added migration `000020_notification_schema_v2`
+  - `notifications` now has internal v2 inbox foundation fields:
+    - `actor_id`
+    - `title`
+    - `content`
+    - `is_read`
+    - `actionable`
+    - `action_kind`
+    - `resource_type`
+    - `resource_id`
+    - `payload`
+    - `updated_at`
+  - expanded notification type support to include:
+    - `mention`
+  - backfill and DB consistency constraints now enforce:
+    - read state consistency
+    - action-kind consistency
+    - resource link consistency
+  - notification repository create, batch create, list, and mark-read now read and write the new v2 fields while preserving:
+    - `event_id`
+    - `message`
+    - current public notification endpoint behavior
+  - notification service producers now populate internal v2 metadata for:
+    - invitation created
+    - page comment created
+    - thread created
+    - thread reply created
+  - public notification JSON contract was intentionally kept unchanged in this task
+  - added application, repository, and HTTP regression coverage for:
+    - v2 producer metadata
+    - repository create/list/mark-read behavior
+    - unchanged notification endpoint behavior
+- Completed invitation roadmap Task 8:
+  - added `POST /api/v1/workspace-invitations/{invitationID}/cancel`
+  - endpoint requires JSON body:
+    - `version`
+  - successful cancel now returns the updated invitation only
+  - cancellation rules are:
+    - any current workspace owner may cancel
+    - outsiders return `404 not_found`
+    - same-workspace non-owner members return `403 forbidden`
+    - only `pending` invitations may be cancelled
+    - stale `version` returns `409 conflict`
+  - repository cancellation is atomic on the invitation row and updates:
+    - `status = cancelled`
+    - `version`
+    - `updated_at`
+    - `cancelled_by`
+    - `cancelled_at`
+  - cancellation does not create or remove workspace membership and leaves:
+    - `accepted_at = null`
+    - `responded_by = null`
+    - `responded_at = null`
+  - added service validation for:
+    - missing actor user record returning `401 unauthorized`
+    - non-positive version
+    - non-member visibility as `404`
+    - non-owner member authorization as `403`
+    - terminal invitation state
+  - added PostgreSQL-backed repository coverage for:
+    - successful cancel transition
+    - stale version conflict
+    - terminal invitation conflict
+    - not-found behavior
+  - added end-to-end HTTP coverage for:
+    - version-required request body
+    - outsider `404`
+    - non-owner member `403`
+    - stale version `409`
+    - invalid JSON and unknown fields
+    - cancelled invitation response metadata
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+  - reran focused application, repository, and HTTP verification for the cancel-invitation flow
+- Completed invitation roadmap Task 7:
+  - added `POST /api/v1/workspace-invitations/{invitationID}/reject`
+  - endpoint requires JSON body:
+    - `version`
+  - successful reject now returns the updated invitation only
+  - rejection rules are:
+    - only the invited user may reject
+    - foreign invitations return `404 not_found`
+    - only `pending` invitations may be rejected
+    - stale `version` returns `409 conflict`
+  - repository rejection is atomic on the invitation row and updates:
+    - `status = rejected`
+    - `version`
+    - `updated_at`
+    - `responded_by`
+    - `responded_at`
+  - rejection does not create workspace membership and leaves:
+    - `accepted_at = null`
+    - `cancelled_by = null`
+    - `cancelled_at = null`
+  - added service validation for:
+    - missing actor user record returning `401 unauthorized`
+    - non-positive version
+    - mismatched invitation email
+    - terminal invitation state
+  - added PostgreSQL-backed repository coverage for:
+    - successful reject transition
+    - stale version conflict
+    - terminal invitation conflict
+    - not-found behavior
+  - added end-to-end HTTP coverage for:
+    - version-required request body
+    - mismatched email `404`
+    - stale version `409`
+    - invalid JSON and unknown fields
+    - rejected invitation response metadata
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+  - reran focused application, repository, and HTTP verification for the reject-invitation flow
+- Completed invitation roadmap Task 6:
+  - upgraded `POST /api/v1/workspace-invitations/{invitationID}/accept` to require JSON body:
+    - `version`
+  - successful accept now returns:
+    - accepted invitation
+    - created membership
+  - acceptance rules are:
+    - only the invited user may accept
+    - foreign invitations return `404 not_found`
+    - only `pending` invitations may be accepted
+    - stale `version` returns `409 conflict`
+    - existing workspace membership returns `409 conflict`
+  - repository acceptance is now atomic across:
+    - membership creation
+    - invitation transition to `accepted`
+  - added service validation for:
+    - missing actor user record returning `401 unauthorized`
+    - non-positive version
+    - mismatched invitation email
+    - terminal invitation state
+  - added PostgreSQL-backed repository coverage for:
+    - accepted invitation state in returned result
+    - stale version and existing member conflicts
+    - not-found behavior
+  - added end-to-end HTTP coverage for:
+    - version-required request body
+    - mismatched email `404`
+    - stale version `409`
+    - invalid JSON and unknown fields
+    - composite success payload
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+  - reran focused application, repository, and HTTP verification for the accept-invitation flow
+- Completed invitation roadmap Task 5:
+  - added `PATCH /api/v1/workspace-invitations/{invitationID}`
+  - endpoint is owner-only and derives workspace authorization from the invitation row
+  - request contract is:
+    - `role`
+    - `version`
+  - update rules are:
+    - only `pending` invitations may be updated
+    - stale `version` returns `409 conflict`
+    - same-role update returns `200` as a no-op
+    - changed role increments `version` and updates `updated_at`
+  - added service validation for:
+    - invalid role
+    - non-positive version
+    - non-owner actor
+    - non-pending invitation
+  - added PostgreSQL-backed repository coverage for:
+    - successful update
+    - same-role no-op
+    - stale version conflict
+    - terminal invitation conflict
+    - not-found behavior
+  - added end-to-end HTTP coverage for:
+    - success
+    - no-op
+    - forbidden
+    - not found
+    - stale version conflict
+    - terminal conflict
+    - invalid JSON and unknown fields
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+  - reran focused application, repository, and HTTP verification for the update-invitation flow
+- Completed invitation roadmap Task 4:
+  - added `GET /api/v1/my/invitations`
+  - endpoint is self-scoped by the authenticated user’s canonical email
+  - returns source-of-truth invitation rows across all workspaces
+  - supports:
+    - `status=all|pending|accepted|rejected|cancelled`
+    - bounded `limit`
+    - forward-only `cursor` pagination
+  - unknown actor user records now return `401 unauthorized` for this endpoint
+  - added PostgreSQL-backed cursor/filter coverage and end-to-end HTTP coverage
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+  - reran focused application, repository, and HTTP verification for the self-scoped invitation list flow
+- Completed invitation roadmap Task 3:
+  - added `GET /api/v1/workspaces/{workspaceID}/invitations`
+  - endpoint is owner-only and returns source-of-truth invitation rows, not notifications
+  - supports:
+    - `status=all|pending|accepted|rejected|cancelled`
+    - bounded `limit`
+    - forward-only `cursor` pagination
+  - results are ordered by:
+    - `created_at DESC, id DESC`
+  - added PostgreSQL-backed cursor/filter coverage and end-to-end HTTP coverage
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+  - reran focused application, repository, and HTTP verification for the workspace invitation list flow
+- Completed invitation roadmap Task 2:
+  - `POST /api/v1/workspaces/{workspaceID}/invitations` now returns public invitation lifecycle fields:
+    - `status`
+    - `version`
+    - `updated_at`
+    - response/cancel audit fields remain nil on create
+  - invitation creation still allows unregistered emails
+  - invitation creation now returns `409 conflict` if the normalized email already belongs to an existing workspace member
+  - notification publish tests now lock the new pending/versioned invitation payload
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+  - reran focused application and HTTP verification for the create-invitation flow
+- Fixed create-thread response contract alignment:
+  - `POST /api/v1/pages/{pageID}/threads` no longer returns `events: null`
+  - the repository create path now returns the persisted `created` event in the immediate response detail
+  - thread service and HTTP regression coverage now lock `events` as an array on create responses
+  - repository integration coverage now asserts the same contract at the PostgreSQL layer
+  - updated `frontend-repo/API_CONTRACT.md` so the create-thread endpoint explicitly documents `events[0]` as the starter `created` event
+  - reran focused thread tests and `go test ./...`
+- Updated API contract for draft-save anchor readiness:
   - `frontend-repo/API_CONTRACT.md`
-  - `frontend-repo/CONTEXT.md`
-  - `context.md`
-  - `docs/backend-feature-roadmap.md`
-- Added/updated tests across application, transport, and repository packages
+  - `PUT /api/v1/pages/{pageID}/draft` now explicitly documents:
+    - each saved top-level block must include a stable non-empty `id`
+    - missing block ids return `422 validation_failed`
+- Completed draft anchor-readiness hardening:
+  - added draft-only thread-anchor validation in:
+    - `internal/application/document_validator.go`
+  - `PageService.UpdateDraft` now rejects blocks without a stable top-level `id`
+  - this moves the failure earlier to draft save instead of letting thread creation fail later with:
+    - `anchor.block_id does not exist in the current draft`
+  - the stricter block-id rule is applied only on draft save, not on the generic historical document validator path
+  - added focused regression coverage in:
+    - `internal/application/document_validator_additional_test.go`
+    - `internal/application/page_service_test.go`
+    - `internal/transport/http/server_test.go`
+  - reran focused application/HTTP tests and `go test ./...`
+- Completed Railway + Supabase deployment hardening slice:
+  - added a production config guard in:
+    - `internal/infrastructure/config/config.go`
+  - production now rejects Supabase transaction-pool `DATABASE_URL` values on:
+    - `*.pooler.supabase.com:6543`
+  - accepted production shapes remain:
+    - Supabase direct `:5432`
+    - Supavisor session pooler `:5432`
+  - added focused regression coverage in:
+    - `internal/infrastructure/config/config_test.go`
+  - added deployment guidance in:
+    - `docs/railway-supabase-deployment.md`
+  - reran focused config tests and `go test ./...`
+- Completed cyber security Task 9:
+  - reran focused security verification across:
+    - `cmd/api`
+    - `internal/infrastructure/auth`
+    - `internal/infrastructure/config`
+    - `internal/application`
+    - `internal/transport/http`
+    - `internal/transport/http/middleware`
+    - `internal/repository/postgres`
+  - reran:
+    - `go test ./...`
+  - closed the current cybersecurity roadmap scope in:
+    - `docs/cyber-security-roadmap.md`
+  - recorded remaining residual risks:
+    - no distributed rate limiting for multi-instance deployments
+    - TLS termination and HSTS still depend on the trusted reverse proxy / edge layer
+    - duplicate registration still returns a conflict
+    - application-layer authorization remains the main control boundary instead of PostgreSQL row-level security
+- Completed cyber security Task 8:
+  - added optional repository-scoped page visibility lookup in:
+    - `internal/repository/postgres/page_repository.go`
+  - added shared page visibility helper in:
+    - `internal/application/resource_visibility.go`
+  - page-based services now use repository-scoped page lookup when available, and otherwise fall back to the existing application-layer membership check
+  - routed the shared helper through:
+    - `internal/application/page_service.go`
+    - `internal/application/comment_service.go`
+    - `internal/application/revision_service.go`
+    - `internal/application/revision_restore.go`
+    - `internal/application/revision_diff.go`
+    - `internal/application/thread_service.go`
+  - added focused regression coverage in:
+    - `internal/application/resource_visibility_test.go`
+    - `internal/repository/postgres/content_repository_test.go`
+  - documented the Task 8 architecture decision:
+    - no PostgreSQL row-level security in this slice
+    - application-layer authorization remains the primary boundary
+    - repository scoping is used as selective defense-in-depth for high-risk page-by-id access
+  - reran focused visibility tests and `go test ./...`
+- Completed cyber security Task 7:
+  - strengthened password validation in:
+    - `internal/application/auth_service.go`
+  - registration passwords now require:
+    - at least 8 characters
+    - uppercase letter
+    - lowercase letter
+    - number
+  - made bcrypt work factor explicit in:
+    - `internal/infrastructure/auth/password.go`
+  - password hashing now uses:
+    - `defaultBcryptCost = 12`
+  - added focused regression coverage in:
+    - `internal/application/auth_service_additional_test.go`
+    - `internal/infrastructure/auth/password_test.go`
+  - reran focused auth/password tests and `go test ./...`
+- Completed cyber security Task 6:
+  - invitation creation in:
+    - `internal/application/workspace_service.go`
+    no longer requires the invitee email to already belong to a registered user
+  - this removes the previous user-existence leak on workspace invitation creation
+  - invitation acceptance now hides mismatched-email probes as:
+    - `not_found`
+    instead of exposing invitation existence through a mismatch-specific error
+  - added focused regression coverage in:
+    - `internal/application/workspace_service_additional_test.go`
+    - `internal/transport/http/server_auth_workspace_test.go`
+  - reran focused auth/workspace tests and `go test ./...`
+  - intentionally left one residual risk documented:
+    - duplicate registration still returns a conflict
+    - fully hiding that would require a broader registration/email-verification redesign
+- Completed cyber security Task 5:
+  - added production-only PostgreSQL DSN transport validation in:
+    - `internal/infrastructure/config/config.go`
+  - `APP_ENV=production` now rejects insecure DSNs that:
+    - disable TLS
+    - allow plaintext fallback
+  - non-production environments remain unchanged
+  - added focused regression coverage in:
+    - `internal/infrastructure/config/config_test.go`
+  - reran focused config tests and `go test ./...`
+- Completed cyber security Task 4:
+  - added baseline security headers middleware in:
+    - `internal/transport/http/middleware/middleware.go`
+  - all responses now include:
+    - `X-Content-Type-Options: nosniff`
+    - `X-Frame-Options: DENY`
+    - `Referrer-Policy: no-referrer`
+  - added auth-route no-store cache protection in:
+    - `internal/transport/http/middleware/middleware.go`
+  - `/api/v1/auth/*` responses now include:
+    - `Cache-Control: no-store`
+    - `Pragma: no-cache`
+  - wired the middleware in:
+    - `internal/transport/http/server.go`
+  - added focused regression coverage in:
+    - `internal/transport/http/middleware/middleware_test.go`
+    - `internal/transport/http/server_auth_workspace_test.go`
+  - documented the remaining HTTPS/HSTS boundary in:
+    - `docs/cyber-security-roadmap.md`
+  - reran focused transport tests and `go test ./...`
+- Completed cyber security Task 3:
+  - added explicit proxy trust configuration in:
+    - `internal/infrastructure/config/config.go`
+  - new config inputs:
+    - `TRUST_PROXY_HEADERS`
+    - `TRUSTED_PROXY_CIDRS`
+  - proxy header trust is now disabled by default
+  - added deterministic client IP resolution in:
+    - `internal/transport/http/middleware/client_ip.go`
+  - removed unconditional forwarded-IP trust from:
+    - `internal/transport/http/server.go`
+  - rate limiting now uses resolved client IP instead of blindly trusting forwarded headers
+  - request and failure logs now include:
+    - `client_ip`
+    - raw peer `remote_addr`
+  - startup now wires proxy trust settings into the HTTP server in:
+    - `cmd/api/app.go`
+  - added focused regression coverage in:
+    - `internal/transport/http/middleware/middleware_test.go`
+    - `internal/transport/http/server_test.go`
+    - `internal/infrastructure/config/config_test.go`
+  - reran focused proxy/rate-limit tests and `go test ./...`
+- Completed cyber security Task 2:
+  - added `internal/application/resource_visibility.go` to collapse foreign resource-by-id membership failures from `forbidden` to `not_found`
+  - applied the hiding rule across audited service flows in:
+    - `internal/application/page_service.go`
+    - `internal/application/comment_service.go`
+    - `internal/application/revision_service.go`
+    - `internal/application/revision_restore.go`
+    - `internal/application/revision_diff.go`
+    - `internal/application/thread_service.go`
+  - kept workspace-scoped list semantics unchanged, including:
+    - `ListPages(workspaceID)`
+    - `ListWorkspaceThreads(workspaceID)`
+  - added focused regression coverage in:
+    - `internal/application/page_service_test.go`
+    - `internal/application/comment_service_test.go`
+    - `internal/application/revision_service_test.go`
+    - `internal/application/thread_service_test.go`
+    - `internal/transport/http/server_test.go`
+  - reran focused authorization regressions and `go test ./...`
+- Completed cyber security Task 1:
+  - tightened access-token validation in:
+    - `internal/infrastructure/auth/token.go`
+  - access tokens now require:
+    - exact `HS256`
+    - expected issuer match
+  - strengthened config-level secret validation in:
+    - `internal/infrastructure/config/config.go`
+  - `JWT_SECRET` now requires a minimum of 32 characters
+  - added focused regression coverage in:
+    - `internal/infrastructure/auth/token_additional_test.go`
+    - `internal/infrastructure/config/config_test.go`
+  - updated supporting auth/config test fixtures to the stronger secret baseline
+- Added cyber security hardening roadmap tracker:
+  - `docs/cyber-security-roadmap.md`
+  - diagnoses the current auth, authz, transport, DB, and deployment-boundary gaps
+  - prioritizes:
+    - token and secret hardening
+    - resource existence leak reduction
+    - trusted-proxy and IP limiter hardening
+    - HTTP security headers
+    - database connection security checks
+- Completed security and error hardening Task 6:
+  - reran focused security/error verification across:
+    - startup log sanitization
+    - startup crash-surface reduction
+    - request-failure log sanitization
+    - validation-message normalization
+    - sensitive-data log redaction
+    - rate-limit and overload middleware contracts
+  - reran `go test ./...`
+  - closed the current security and error hardening roadmap scope
+- Completed security and error hardening Task 5:
+  - `cmd/api/main.go` no longer panics on startup flag parsing or config load failures
+  - startup failures now write a short error to stderr and exit with code `1`
+  - `cmd/api/app.go` now recovers startup panics during server construction and converts them into explicit build-stage errors
+  - added focused regression coverage in:
+    - `cmd/api/app_test.go`
+    - `cmd/api/main_test.go`
+- Completed security and error hardening Task 4:
+  - added centralized log sanitization for sensitive URL-carried values in:
+    - `internal/transport/http/middleware/log_sanitizer.go`
+  - request logging now redacts sensitive query keys such as:
+    - `password`
+    - `refresh_token`
+    - `access_token`
+    - `secret`
+    - `api_key`
+  - referer logging now redacts sensitive query and fragment values
+  - request-failure logging now sanitizes logged query strings before writing structured error logs
+  - added focused regression coverage proving logs do not contain:
+    - raw DSN values on startup paths
+    - refresh tokens and passwords from URL query logging
+    - bearer tokens, refresh tokens, or stored password hashes during normal auth request flows
+- Completed security and error hardening Task 3:
+  - normalized client-facing validation messages at the transport layer in:
+    - `internal/transport/http/server.go`
+  - removed wrapped validation prefixes such as `validation failed:` from response messages
+  - added focused regression coverage in:
+    - `internal/transport/http/server_auth_workspace_test.go`
+- Completed security and error hardening Task 2:
+  - removed raw `err.Error()` logging from request-failure logs in:
+    - `internal/transport/http/server.go`
+  - kept safe structured fields such as request metadata, status, error code, and failure class
+  - added focused regression coverage in:
+    - `internal/transport/http/server_test.go`
+- Completed security and error hardening Task 1:
+  - added testable logger injection to `cmd/api/app.go`
+  - sanitized startup and infrastructure logs so they no longer emit raw error strings on:
+    - database connection failure
+    - server listen failure
+    - server shutdown failure
+  - added focused regression coverage in:
+    - `cmd/api/app_test.go`
+- Added security and error hardening roadmap tracker:
+  - `docs/security-error-hardening-roadmap.md`
+- Completed backend hardening Task 6:
+  - fixed the overload-test shared-map race by synchronizing `testPageRepo`
+  - corrected `429 Retry-After` to use the remaining limiter window instead of always the full window
+  - added stronger regression coverage for:
+    - `429` and `503` JSON payloads
+    - `Content-Type`
+    - `Retry-After`
+    - shared heavy-route limiter interaction across endpoints
+  - reran focused limiter tests and the full Go test suite
+- Completed backend hardening Task 5:
+  - added semaphore-based overload shedding in:
+    - `internal/transport/http/middleware/middleware.go`
+  - protected the first high-cost route set in:
+    - `internal/transport/http/server.go`
+  - protected heavy routes:
+    - `PUT /api/v1/pages/{pageID}/draft`
+    - `POST /api/v1/pages/{pageID}/revisions`
+    - `GET /api/v1/pages/{pageID}/revisions/compare`
+    - `POST /api/v1/pages/{pageID}/revisions/{revisionID}/restore`
+  - heavy routes now share one limiter pool instead of isolated per-route pools
+  - saturated heavy routes return `503 overloaded`
+  - non-heavy routes stay available while heavy-route slots are occupied
+  - added regression coverage in:
+    - `internal/transport/http/middleware/middleware_test.go`
+    - `internal/transport/http/server_test.go`
+- Completed backend hardening Task 4:
+  - added stricter auth throttling only for:
+    - `/api/v1/auth/login`
+    - `/api/v1/auth/refresh`
+  - auth throttle:
+    - `5 requests/minute per client IP`
+  - kept these routes outside the stricter auth limiter:
+    - `/api/v1/auth/register`
+    - `/api/v1/auth/logout`
+    - `/healthz`
+  - added regression coverage in:
+    - `internal/transport/http/server_auth_workspace_test.go`
+- Completed backend hardening Task 3:
+  - added in-process fixed-window per-IP rate limiting in:
+    - `internal/transport/http/middleware/middleware.go`
+  - applied the limiter only to `/api/v1` routes in:
+    - `internal/transport/http/server.go`
+  - default global throttle:
+    - `120 requests/minute per client IP`
+  - kept `/healthz` outside the limiter scope
+  - added regression coverage in:
+    - `internal/transport/http/middleware/middleware_test.go`
+    - `internal/transport/http/server_test.go`
+- Completed backend hardening Task 2:
+  - `internal/transport/http/response.go` now enforces:
+    - default JSON body cap of `1 MiB`
+    - larger draft-update body cap of `8 MiB`
+    - rejection of trailing JSON after the first decoded value
+  - updated all JSON handlers to use the response-aware capped decoder
+  - added regression coverage in:
+    - `internal/transport/http/response_test.go`
+    - `internal/transport/http/server_test.go`
+- Added backend hardening roadmap tracker:
+  - `docs/backend-hardening-roadmap.md`
+- Completed backend hardening Task 1:
+  - `cmd/api/app.go` now sets:
+    - `ReadTimeout=15s`
+    - `WriteTimeout=35s`
+    - `IdleTimeout=60s`
+    - `MaxHeaderBytes=1<<20`
+  - added regression coverage in:
+    - `cmd/api/app_test.go`
+- Added threaded discussion roadmap tracker:
+  - `docs/threaded-discussion-roadmap.md`
+- Added threaded discussion schema and domain types:
+  - `page_comment_threads`
+  - `page_comment_messages`
+  - `internal/domain/thread.go`
+- Added thread create endpoint:
+  - `POST /api/v1/pages/{pageID}/threads`
+- Added thread detail endpoint:
+  - `GET /api/v1/threads/{threadID}`
+- Added thread list endpoint:
+  - `GET /api/v1/pages/{pageID}/threads`
+- Added thread reply endpoint:
+  - `POST /api/v1/threads/{threadID}/replies`
+- Added thread resolve endpoint:
+  - `POST /api/v1/threads/{threadID}/resolve`
+- Added thread reopen endpoint:
+  - `POST /api/v1/threads/{threadID}/reopen`
+- Added internal anchor evaluator for thread `anchor_state`
+- Added draft-update hook that reevaluates page thread anchors after successful draft persistence
+- Added revision-restore hook that reevaluates page thread anchors after successful restore persistence
+- Added thread list behavior:
+  - page-scoped filter counts for `open`, `resolved`, `active`, `outdated`, `missing`
+  - filters for `thread_state`, `anchor_state`, and `q`
+  - default order `open first`, then `last_activity_at DESC`, then `id ASC`
+  - substring search over anchor snapshots and message bodies
+- Added thread reply behavior:
+  - workspace members can reply
+  - blank reply body returns `422 validation_failed`
+  - reply updates `last_activity_at`
+  - reply auto-reopens resolved threads in one transaction
+  - auto-reopen clears `resolved_by` / `resolved_at`
+  - auto-reopen sets `reopened_by` / `reopened_at`
+- Added explicit thread lifecycle behavior:
+  - resolve is `owner|editor` only
+  - reopen is allowed for any workspace member
+  - resolve is idempotent
+  - reopen is idempotent
+- Added anchor-state evaluation rules:
+  - `active` when anchored block exists and exact block text matches snapshot
+  - `outdated` when anchored block exists but text changed
+  - `missing` when anchored block no longer exists
+- Added draft-update reevaluation behavior:
+  - `PUT /api/v1/pages/{pageID}/draft` now reevaluates all threads on that page after the draft is saved
+  - reevaluation uses the existing anchor evaluator without changing thread lifecycle rules
+- Added revision-restore reevaluation behavior:
+  - restoring a revision now reevaluates all threads on that page after the restored draft is saved
+  - reevaluation uses the same `active|outdated|missing` rules as normal draft updates
+- Finalized v1 thread search behavior:
+  - page-scoped `q` search is now explicitly verified across service, repository, and HTTP layers
+  - search matches `anchor.quoted_text`, `anchor.quoted_block_text`, and thread message bodies
+- Added thread notification behavior:
+  - new thread creation publishes notifications only to relevant users
+  - new thread replies publish notifications only to relevant users
+  - existing batched `comment` notification type and dedupe strategy are reused
+  - resolve and reopen do not notify in v1
+- Finalized thread contract guidance:
+  - documented legacy flat comments as deprecated for new discussion UI
+  - documented thread endpoints as the preferred frontend integration path
+- Started legacy threaded-discussion hardening:
+  - restoring a trashed page now reevaluates thread anchors with the restored draft content
+  - `RestoreTrashItem` now propagates reevaluator failures instead of skipping them
+  - deleting a page now reevaluates thread anchors against an empty document
+  - `DeletePage` now propagates reevaluator failures instead of skipping them
+  - added regression coverage proving normal thread endpoints return `404 not_found` for trashed pages
+  - covered backend paths: thread detail, thread list, and thread reply
+  - added regression coverage proving create, resolve, and reopen also return `404 not_found` for trashed pages
+  - added explicit HTTP idempotency coverage for repeated resolve and reopen requests
+  - added HTTP regression coverage for malformed JSON on thread create and reply endpoints returning `400 invalid_json`
+  - added HTTP regression coverage for invalid `anchor_state` on thread list returning `422 validation_failed`
+  - confirmed existing handlers already matched the contract, so this slice required no production code changes
+  - added service and HTTP regression coverage proving non-members receive forbidden responses for thread create, detail, list, reply, resolve, and reopen
+  - confirmed existing permission checks already matched the contract, so this slice also required no production code changes
+  - added service regression coverage proving thread create and reply propagate notification publisher failures after persistence
+  - added HTTP regression coverage proving those notification failures surface as `500`
+  - confirmed existing notification failure handling already matched the contract, so this slice also required no production code changes
+  - added PostgreSQL-backed repository regression coverage for:
+    - missing-thread reply updates returning `ErrNotFound`
+    - missing-thread state updates returning `ErrNotFound`
+    - direct `anchor_state` filtering
+    - page-wide filter counts remaining stable under filtering
+  - closed the first legacy threaded-discussion hardening stage and advanced that older roadmap to the thread-list filter stage
+  - implemented the first legacy thread-list filter slice:
+    - page-scoped thread list now supports `created_by=me`
+    - invalid `created_by` values return `422 validation_failed`
+    - service, HTTP, and PostgreSQL-backed repository coverage now lock the filter behavior end to end
+  - updated API contract documentation for the new list filter
+  - implemented the second legacy thread-list filter slice:
+    - page-scoped thread list now supports `has_missing_anchor=true|false`
+    - invalid `has_missing_anchor` values return `422 validation_failed`
+    - service, HTTP, and PostgreSQL-backed repository coverage now lock the filter behavior end to end
+  - updated API contract documentation for the new missing-anchor filter
+  - implemented the third legacy thread-list filter slice:
+    - page-scoped thread list now supports `has_outdated_anchor=true|false`
+    - invalid `has_outdated_anchor` values return `422 validation_failed`
+    - service, HTTP, and PostgreSQL-backed repository coverage now lock the filter behavior end to end
+  - updated API contract documentation for the new outdated-anchor filter
+  - implemented the fourth legacy thread-list filter slice:
+    - page-scoped thread list now supports `sort=recent_activity|newest|oldest`
+    - invalid `sort` values return `422 validation_failed`
+    - service, HTTP, and PostgreSQL-backed repository coverage now lock ordering behavior end to end
+  - updated API contract documentation for list sort modes
+  - closed the legacy thread-list filter stage and advanced that older roadmap to the workspace thread inbox stage
+  - implemented the first legacy workspace thread inbox slice:
+    - added `GET /api/v1/workspaces/{workspaceID}/threads`
+    - workspace inbox returns page summary data alongside each thread
+    - workspace inbox supports the same filters, search, and sort modes as page thread listing
+    - workspace search also matches page title
+    - workspace counts remain workspace-scoped and do not change with filters
+  - updated API contract documentation for the workspace thread inbox endpoint
+  - implemented the second legacy workspace thread inbox slice:
+    - added explicit HTTP coverage for workspace inbox `created_by=me` and page-title search
+    - added PostgreSQL-backed coverage proving trashed pages are excluded from the workspace inbox
+    - hardened the workspace inbox contract without changing its public response shape
+  - closed the legacy workspace thread inbox stage and advanced that older roadmap to the lifecycle-history stage
+  - implemented the first legacy lifecycle-history slice:
+    - added migration `000013_thread_activity_notes` for `resolve_note` and `reopen_reason`
+    - resolve now accepts and persists an optional trimmed `resolve_note`
+    - reopen now accepts and persists an optional trimmed `reopen_reason`
+    - reopen clears `resolve_note`, and resolve clears stale `reopen_reason`
+    - reply-driven auto-reopen also clears stale resolve/reopen note metadata
+  - updated API contract documentation for resolve/reopen request and response metadata
+  - implemented the second legacy lifecycle-history slice:
+    - added migration `000014_thread_events` for thread lifecycle events
+    - thread detail now returns ordered `events` in addition to `thread` and `messages`
+    - repository-owned event persistence now records:
+      - `created`
+      - `replied`
+      - `resolved`
+      - `reopened`
+      - `anchor_state_changed`
+    - reply-driven auto-reopen now records both `reopened` and `replied`
+    - thread lists and workspace inbox responses remain unchanged
+  - updated API contract documentation for thread event payloads and thread-detail event history
+  - implemented the third legacy lifecycle-history slice:
+    - added migration `000015_thread_event_reasons` for event trigger reasons
+    - `anchor_state_changed` events now persist reevaluation reasons:
+      - `draft_updated`
+      - `page_deleted`
+      - `page_restored`
+      - `revision_restored`
+    - page draft save, page delete, trash restore, and revision restore now propagate explicit reason codes into thread event history
+  - updated API contract documentation for thread event `reason`
+  - added backend cursor pagination hardening for thread lists:
+    - `GET /api/v1/pages/{pageID}/threads` now supports `limit` and `cursor`
+    - `GET /api/v1/workspaces/{workspaceID}/threads` now supports `limit` and `cursor`
+    - list responses now include `next_cursor` and `has_more`
+    - pagination is forward-only and sort-aware for `recent_activity`, `newest`, and `oldest`
+    - explicit API validation now rejects non-positive or oversized `limit` values
+    - service, HTTP, and PostgreSQL-backed repository coverage now lock cursor pagination behavior end to end
+  - implemented the first Task 20 slice:
+    - anchor reevaluation now attempts exact unique reanchor by `quoted_block_text` when the saved `block_id` disappears
+    - unique exact match recovers the thread anchor to the new `block_id`
+    - ambiguous or absent matches still resolve safely to `missing`
+    - thread state persistence now updates recovered anchor fields, not just lifecycle state fields
+  - updated API contract documentation for exact unique anchor recovery behavior
+  - implemented the second Task 20 slice:
+    - anchor reevaluation now falls back to unique exact `quoted_text` recovery when full-block recovery is unavailable
+    - quoted-text recovery marks the thread `outdated` and recovers the new `block_id`
+    - added migration `000016_thread_event_anchor_recovery` for `anchor_recovered` events with `from_block_id` and `to_block_id`
+    - thread detail history now records explicit anchor recovery events instead of silently moving anchors
+  - updated API contract documentation for `anchor_recovered`, `from_block_id`, and `to_block_id`
+  - implemented the third Task 20 slice:
+    - added migration `000018_thread_event_revision_linkage` for optional event `revision_id`
+    - revision restore now passes the restored revision id into thread anchor reevaluation
+    - `anchor_state_changed` and `anchor_recovered` events now persist `revision_id` when reevaluation comes from revision restore
+  - updated API contract documentation for revision-linked anchor events
+- Updated docs/contracts:
+  - `docs/threaded-discussion-roadmap.md`
+  - `docs/checkpoint.md`
+- Added backend code and tests for the first hardening slice
 
 Verification completed in this session:
-- `go test ./cmd/migrate` passed
-- `go test ./internal/infrastructure/database -run TestFormatFolderSiblingUniquenessConflicts` passed
-- `go test ./internal/application ./internal/transport/http` passed
-- `go test ./internal/repository/postgres -run TestDoesNotExist` passed (compile-only check)
-- `go test ./internal/repository/postgres` could not run because PostgreSQL was unavailable on `localhost:5432`
+- `go test ./internal/application ./internal/transport/http -run "Thread(Service(CreateThreadReturnsNotFoundWhenPageIsTrashed|ResolveAndReopenReturnNotFoundWhenPageIsTrashed)|CreateResolveAndReopenReturnNotFoundWhenPageIsTrashed|ThreadResolveAndReopenEndpoints)"` passed
+- `go test ./internal/transport/http -run "Thread(CreateEndpoint|ListEndpoint|ReplyEndpoint)"` passed
+- `go test ./internal/application -run "ThreadService(CreateThreadReturnsForbiddenForNonMember|GetThread|ListThreads|CreateReply|ResolveAndReopenThread)"` passed
+- `go test ./internal/transport/http -run "Thread(CreateEndpoint|DetailEndpoint|ListEndpoint|ReplyEndpoint|ResolveAndReopenEndpoints)"` passed
+- `go test ./internal/application -run "ThreadService(CreateThreadPropagatesNotificationFailure|CreateReplyPropagatesNotificationFailure)"` passed
+- `go test ./internal/transport/http -run "ThreadEndpointsPropagateNotificationFailures"` passed
+- `go test ./internal/repository/postgres -run "TestPageRepositoryIntegration"` passed
+- `go test ./internal/application -run "TestThreadServiceListThreads"` passed
+- `go test ./internal/transport/http -run "TestThreadListEndpoint"` passed
+- `go test ./internal/repository/postgres -run "TestPageRepositoryIntegration"` passed
+- `go test ./internal/application -run "TestThreadServiceListThreads"` passed
+- `go test ./internal/transport/http -run "TestThreadListEndpoint"` passed
+- `go test ./internal/repository/postgres -run "TestPageRepositoryIntegration"` passed
+- `go test ./internal/application -run "TestThreadServiceListThreads"` passed
+- `go test ./internal/transport/http -run "TestThreadListEndpoint"` passed
+- `go test ./internal/repository/postgres -run "TestPageRepositoryIntegration"` passed
+- `go test ./internal/application -run "TestThreadServiceListThreads"` passed
+- `go test ./internal/transport/http -run "TestThreadListEndpoint"` passed
+- `go test ./internal/repository/postgres -run "TestPageRepositoryIntegration"` passed
+- `go test ./internal/application -run "TestThreadServiceList(Threads|WorkspaceThreads)"` passed
+- `go test ./internal/transport/http -run "Test(WorkspaceThreadListEndpoint|ThreadListEndpoint)"` passed
+- `go test ./internal/repository/postgres -run "TestPageRepositoryIntegration|TestClosedPoolRepositoryErrors"` passed
+- `go test ./internal/transport/http -run "TestWorkspaceThreadListEndpoint"` passed
+- `go test ./internal/repository/postgres -run "TestPageRepositoryIntegration"` passed
+- `go test ./internal/application -run "TestThreadServiceResolveAndReopenThread"` passed
+- `go test ./internal/transport/http -run "TestThreadResolveAndReopenEndpoints"` passed
+- `go test ./internal/repository/postgres -run "TestPageRepositoryIntegration"` passed
+- `go test ./internal/application -run "TestThreadServiceGetThread"` passed
+- `go test ./internal/transport/http -run "TestThreadDetailEndpoint"` passed
+- `go test ./internal/repository/postgres -run "TestRevisionCommentNotificationRepositoriesIntegration"` passed
+- `go test ./internal/application -run "Test(PageService(UpdateDraftTriggersThreadAnchorReevaluation|DeletePageTriggersThreadAnchorReevaluationToMissing|RestoreTrashItemTriggersThreadAnchorReevaluation)|RestoreRevisionAdditionalBranches|ThreadServiceReevaluatePageAnchors)"` passed
+- `go test ./internal/repository/postgres -run "TestRevisionCommentNotificationRepositoriesIntegration"` passed
+- `go test ./internal/transport/http -run "TestThreadDetailEndpoint"` passed
 
 Local runtime state after verification:
 - API server status: not started by this session
@@ -42,20 +1171,25 @@ Local runtime state after verification:
 
 ## Current State
 Completed roadmap features:
-- 1 through 23 (all backend roadmap features)
+- Invitation roadmap Task 25 complete; tasks 1 through 25 are implemented
 
 Backend status:
-- Backend roadmap implementation complete
-- Post-roadmap rename extension implemented
-- No frontend work started
-- No additional strict backend feature remains in `docs/backend-feature-roadmap.md`
+- Invitation, notification inbox, unread counter, transactional thread outbox, mention schema, create-thread mention write support, reply mention support, mention notification projection, and per-thread notification preference read/write are implemented through Task 25
+- Available thread endpoints:
+  - `POST /api/v1/pages/{pageID}/threads`
+  - `GET /api/v1/pages/{pageID}/threads`
+  - `GET /api/v1/threads/{threadID}`
+  - `POST /api/v1/threads/{threadID}/replies`
+  - `POST /api/v1/threads/{threadID}/resolve`
+  - `POST /api/v1/threads/{threadID}/reopen`
+- Next roadmap task is Task 26 notification stream endpoint
 
 ## Exact Next Step
-- Frontend can add workspace rename and folder rename flows against:
-  - `PATCH /api/v1/workspaces/{workspaceID}`
-  - `PATCH /api/v1/folders/{folderID}`
+- Implement:
+  - Task 26 notification stream endpoint
+Keep the roadmap and checkpoint aligned after each backend hardening slice.
 
 ## Resume Prompt
 If resuming in a new session, use this instruction:
 
-"Read `context.md`, `AGENTS.md`, and `docs/checkpoint.md` first. Continue from the current state without repeating completed work. Treat backend roadmap features as complete through feature 23, and treat workspace/folder rename as already implemented post-roadmap scope unless I explicitly add new scope." 
+"Read `context.md`, `AGENTS.md`, `docs/checkpoint.md`, and `docs/invitation-notification-thread-execution-checklist.md` first. Continue from the invitation-notification roadmap state without repeating completed work. Treat Tasks 1 through 25 as implemented, Task 26 as next, and keep thread notification delivery scoped to relevant users unless I explicitly change scope."

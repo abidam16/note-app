@@ -3,6 +3,8 @@ package auth
 import (
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestTokenManagerParseFailures(t *testing.T) {
@@ -30,6 +32,45 @@ func TestTokenManagerParseFailures(t *testing.T) {
 	}
 	if _, err := manager.ParseAccessToken(expiredToken); err == nil {
 		t.Fatal("expected parse to fail for expired token")
+	}
+}
+
+func TestTokenManagerRejectsWrongIssuer(t *testing.T) {
+	now := time.Now().UTC()
+	manager := NewTokenManager("super-secret-token", "note-app", time.Minute)
+	otherIssuer := NewTokenManager("super-secret-token", "other-app", time.Minute)
+
+	token, _, err := otherIssuer.GenerateAccessToken("user-1", "user@example.com", now)
+	if err != nil {
+		t.Fatalf("GenerateAccessToken() error = %v", err)
+	}
+
+	if _, err := manager.ParseAccessToken(token); err == nil {
+		t.Fatal("expected parse to fail for wrong issuer")
+	}
+}
+
+func TestTokenManagerRejectsDifferentHMACAlgorithm(t *testing.T) {
+	now := time.Now().UTC()
+	claims := Claims{
+		Email: "user@example.com",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "user-1",
+			Issuer:    "note-app",
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Minute)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS384, claims)
+	signed, err := token.SignedString([]byte("super-secret-token"))
+	if err != nil {
+		t.Fatalf("sign hs384 token: %v", err)
+	}
+
+	manager := NewTokenManager("super-secret-token", "note-app", time.Minute)
+	if _, err := manager.ParseAccessToken(signed); err == nil {
+		t.Fatal("expected parse to fail for non-HS256 HMAC token")
 	}
 }
 

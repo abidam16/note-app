@@ -65,7 +65,7 @@ func TestTokenManagerParseUnexpectedSigningMethod(t *testing.T) {
 	}
 
 	manager := NewTokenManager("secret", "note-app", time.Minute)
-	if _, err := manager.ParseAccessToken(signed); err == nil || !strings.Contains(err.Error(), "unexpected signing method") {
-		t.Fatalf("expected unexpected signing method error, got %v", err)
+	if _, err := manager.ParseAccessToken(signed); err == nil || !strings.Contains(err.Error(), "signing method RS256 is invalid") {
+		t.Fatalf("expected invalid signing method error, got %v", err)
 	}
 }

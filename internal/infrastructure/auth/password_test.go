@@ -2,6 +2,8 @@ package auth
 
 import (
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestPasswordManagerHashAndCompare(t *testing.T) {
@@ -18,5 +20,13 @@ func TestPasswordManagerHashAndCompare(t *testing.T) {
 	}
 	if err := m.Compare(hash, "wrong"); err == nil {
 		t.Fatal("compare should fail for wrong password")
+	}
+
+	cost, err := bcrypt.Cost([]byte(hash))
+	if err != nil {
+		t.Fatalf("read bcrypt cost: %v", err)
+	}
+	if cost != defaultBcryptCost {
+		t.Fatalf("unexpected bcrypt cost: got %d want %d", cost, defaultBcryptCost)
 	}
 }

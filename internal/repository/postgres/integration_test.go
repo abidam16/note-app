@@ -10,11 +10,10 @@ import (
 	"time"
 
 	"note-app/internal/infrastructure/database"
+	"note-app/internal/testutil/testenv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-const defaultTestDSN = "postgres://noteapp:noteapp@localhost:5432/noteapp?sslmode=disable"
 
 var (
 	testPoolOnce sync.Once
@@ -29,13 +28,15 @@ func integrationPool(t *testing.T) *pgxpool.Pool {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 
-		dsn := os.Getenv("POSTGRES_DSN")
-		if dsn == "" {
-			dsn = defaultTestDSN
-		}
-
 		_, thisFile, _, _ := runtime.Caller(0)
 		projectRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
+
+		dsn, err := testenv.ResolvePostgresDSN(projectRoot)
+		if err != nil {
+			testPoolErr = err
+			return
+		}
+
 		testPoolErr = os.Chdir(projectRoot)
 		if testPoolErr != nil {
 			return
@@ -68,7 +69,12 @@ func resetTestDatabase(t *testing.T, pool *pgxpool.Pool) {
 
 	_, err := pool.Exec(ctx, `
 		TRUNCATE TABLE
+			outbox_events,
 			notifications,
+		page_comment_message_mentions,
+		thread_notification_preferences,
+		page_comment_messages,
+			page_comment_threads,
 			page_comments,
 			revisions,
 			trash_items,

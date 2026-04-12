@@ -38,6 +38,10 @@ func TestHandlersInvalidJSONBranches(t *testing.T) {
 		{name: "create workspace invalid json", method: http.MethodPost, path: "/api/v1/workspaces", body: `{"name":`, needAuth: true, expectCode: http.StatusBadRequest},
 		{name: "rename workspace invalid json", method: http.MethodPatch, path: "/api/v1/workspaces/w1", body: `{"name":`, needAuth: true, expectCode: http.StatusBadRequest},
 		{name: "invite member invalid json", method: http.MethodPost, path: "/api/v1/workspaces/w1/invitations", body: `{"email":`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "update invitation invalid json", method: http.MethodPatch, path: "/api/v1/workspace-invitations/inv-1", body: `{"role":`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "accept invitation invalid json", method: http.MethodPost, path: "/api/v1/workspace-invitations/inv-1/accept", body: `{"version":`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "reject invitation invalid json", method: http.MethodPost, path: "/api/v1/workspace-invitations/inv-1/reject", body: `{"version":`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "cancel invitation invalid json", method: http.MethodPost, path: "/api/v1/workspace-invitations/inv-1/cancel", body: `{"version":`, needAuth: true, expectCode: http.StatusBadRequest},
 		{name: "update member role invalid json", method: http.MethodPatch, path: "/api/v1/workspaces/w1/members/m1/role", body: `{"role":`, needAuth: true, expectCode: http.StatusBadRequest},
 		{name: "create folder invalid json", method: http.MethodPost, path: "/api/v1/workspaces/w1/folders", body: `{"name":`, needAuth: true, expectCode: http.StatusBadRequest},
 		{name: "rename folder invalid json", method: http.MethodPatch, path: "/api/v1/folders/f1", body: `{"name":`, needAuth: true, expectCode: http.StatusBadRequest},
@@ -46,6 +50,12 @@ func TestHandlersInvalidJSONBranches(t *testing.T) {
 		{name: "update draft invalid json", method: http.MethodPut, path: "/api/v1/pages/p1/draft", body: `{"content":`, needAuth: true, expectCode: http.StatusBadRequest},
 		{name: "create revision invalid json", method: http.MethodPost, path: "/api/v1/pages/p1/revisions", body: `{"label":`, needAuth: true, expectCode: http.StatusBadRequest},
 		{name: "create comment invalid json", method: http.MethodPost, path: "/api/v1/pages/p1/comments", body: `{"body":`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "batch notification read invalid json", method: http.MethodPost, path: "/api/v1/notifications/read", body: `{"notification_ids":`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "batch notification read empty body", method: http.MethodPost, path: "/api/v1/notifications/read", body: ``, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "batch notification read unknown field", method: http.MethodPost, path: "/api/v1/notifications/read", body: `{"notification_ids":[],"extra":1}`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "thread notification preference invalid json", method: http.MethodPut, path: "/api/v1/threads/thread-1/notification-preference", body: `{"mode":`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "thread notification preference wrong type", method: http.MethodPut, path: "/api/v1/threads/thread-1/notification-preference", body: `{"mode":1}`, needAuth: true, expectCode: http.StatusBadRequest},
+		{name: "thread notification preference unknown field", method: http.MethodPut, path: "/api/v1/threads/thread-1/notification-preference", body: `{"mode":"mute","extra":1}`, needAuth: true, expectCode: http.StatusBadRequest},
 	}
 
 	for _, tc := range cases {

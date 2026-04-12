@@ -52,16 +52,31 @@ func (r PageRepository) CreateWithDraft(ctx context.Context, page domain.Page, d
 }
 
 func (r PageRepository) GetByID(ctx context.Context, pageID string) (domain.Page, domain.PageDraft, error) {
-	pageQuery := `
-		SELECT id, workspace_id, folder_id, title, created_by, created_at, updated_at
-		FROM pages
-		WHERE id = $1
-		  AND deleted_at IS NULL
+	query := `
+		SELECT
+			p.id,
+			p.workspace_id,
+			p.folder_id,
+			p.title,
+			p.created_by,
+			p.created_at,
+			p.updated_at,
+			d.page_id,
+			d.content,
+			d.search_body,
+			d.last_edited_by,
+			d.created_at,
+			d.updated_at
+		FROM pages p
+		JOIN page_drafts d ON d.page_id = p.id
+		WHERE p.id = $1
+		  AND p.deleted_at IS NULL
 	`
 
 	var page domain.Page
+	var draft domain.PageDraft
 	var folderID *string
-	if err := r.db.QueryRow(ctx, pageQuery, pageID).Scan(
+	if err := r.db.QueryRow(ctx, query, pageID).Scan(
 		&page.ID,
 		&page.WorkspaceID,
 		&folderID,
@@ -69,22 +84,6 @@ func (r PageRepository) GetByID(ctx context.Context, pageID string) (domain.Page
 		&page.CreatedBy,
 		&page.CreatedAt,
 		&page.UpdatedAt,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.Page{}, domain.PageDraft{}, domain.ErrNotFound
-		}
-		return domain.Page{}, domain.PageDraft{}, fmt.Errorf("select page by id: %w", err)
-	}
-	page.FolderID = folderID
-
-	draftQuery := `
-		SELECT page_id, content, search_body, last_edited_by, created_at, updated_at
-		FROM page_drafts
-		WHERE page_id = $1
-	`
-
-	var draft domain.PageDraft
-	if err := r.db.QueryRow(ctx, draftQuery, pageID).Scan(
 		&draft.PageID,
 		&draft.Content,
 		&draft.SearchBody,
@@ -95,10 +94,159 @@ func (r PageRepository) GetByID(ctx context.Context, pageID string) (domain.Page
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Page{}, domain.PageDraft{}, domain.ErrNotFound
 		}
-		return domain.Page{}, domain.PageDraft{}, fmt.Errorf("select page draft: %w", err)
+		return domain.Page{}, domain.PageDraft{}, fmt.Errorf("select page with draft: %w", err)
 	}
+	page.FolderID = folderID
 
 	return page, draft, nil
+}
+
+func (r PageRepository) GetVisibleByUserID(ctx context.Context, pageID string, userID string) (domain.Page, domain.PageDraft, error) {
+	query := `
+		SELECT
+			p.id,
+			p.workspace_id,
+			p.folder_id,
+			p.title,
+			p.created_by,
+			p.created_at,
+			p.updated_at,
+			d.page_id,
+			d.content,
+			d.search_body,
+			d.last_edited_by,
+			d.created_at,
+			d.updated_at
+		FROM pages p
+		JOIN page_drafts d ON d.page_id = p.id
+		JOIN workspace_members wm ON wm.workspace_id = p.workspace_id
+		WHERE p.id = $1
+		  AND wm.user_id = $2
+		  AND p.deleted_at IS NULL
+	`
+
+	var page domain.Page
+	var draft domain.PageDraft
+	var folderID *string
+	if err := r.db.QueryRow(ctx, query, pageID, userID).Scan(
+		&page.ID,
+		&page.WorkspaceID,
+		&folderID,
+		&page.Title,
+		&page.CreatedBy,
+		&page.CreatedAt,
+		&page.UpdatedAt,
+		&draft.PageID,
+		&draft.Content,
+		&draft.SearchBody,
+		&draft.LastEditedBy,
+		&draft.CreatedAt,
+		&draft.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Page{}, domain.PageDraft{}, domain.ErrNotFound
+		}
+		return domain.Page{}, domain.PageDraft{}, fmt.Errorf("select visible page with draft: %w", err)
+	}
+	page.FolderID = folderID
+
+	return page, draft, nil
+}
+
+func (r PageRepository) GetTrashedByTrashItemID(ctx context.Context, trashItemID string) (domain.TrashItem, domain.Page, domain.PageDraft, error) {
+	query := `
+		SELECT
+			t.id,
+			t.workspace_id,
+			t.page_id,
+			t.page_title,
+			t.deleted_by,
+			t.deleted_at,
+			p.id,
+			p.workspace_id,
+			p.folder_id,
+			p.title,
+			p.created_by,
+			p.created_at,
+			p.updated_at,
+			d.page_id,
+			d.content,
+			d.search_body,
+			d.last_edited_by,
+			d.created_at,
+			d.updated_at
+		FROM trash_items t
+		JOIN pages p ON p.id = t.page_id
+		JOIN page_drafts d ON d.page_id = p.id
+		WHERE t.id = $1
+		  AND t.restored_at IS NULL
+		  AND p.deleted_at IS NOT NULL
+	`
+
+	var trashItem domain.TrashItem
+	var page domain.Page
+	var draft domain.PageDraft
+	var folderID *string
+	if err := r.db.QueryRow(ctx, query, trashItemID).Scan(
+		&trashItem.ID,
+		&trashItem.WorkspaceID,
+		&trashItem.PageID,
+		&trashItem.PageTitle,
+		&trashItem.DeletedBy,
+		&trashItem.DeletedAt,
+		&page.ID,
+		&page.WorkspaceID,
+		&folderID,
+		&page.Title,
+		&page.CreatedBy,
+		&page.CreatedAt,
+		&page.UpdatedAt,
+		&draft.PageID,
+		&draft.Content,
+		&draft.SearchBody,
+		&draft.LastEditedBy,
+		&draft.CreatedAt,
+		&draft.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.TrashItem{}, domain.Page{}, domain.PageDraft{}, domain.ErrNotFound
+		}
+		return domain.TrashItem{}, domain.Page{}, domain.PageDraft{}, fmt.Errorf("select trashed page with draft: %w", err)
+	}
+	page.FolderID = folderID
+
+	return trashItem, page, draft, nil
+}
+
+func (r PageRepository) ListByWorkspaceIDAndFolderID(ctx context.Context, workspaceID string, folderID *string) ([]domain.PageSummary, error) {
+	query := `
+		SELECT id, workspace_id, folder_id, title, updated_at
+		FROM pages
+		WHERE workspace_id = $1
+		  AND deleted_at IS NULL
+		  AND (($2::uuid IS NULL AND folder_id IS NULL) OR folder_id = $2::uuid)
+		ORDER BY updated_at DESC, id ASC
+	`
+
+	rows, err := r.db.Query(ctx, query, workspaceID, folderID)
+	if err != nil {
+		return nil, fmt.Errorf("list pages by workspace and folder: %w", err)
+	}
+	defer rows.Close()
+
+	pages := make([]domain.PageSummary, 0)
+	for rows.Next() {
+		var page domain.PageSummary
+		if err := rows.Scan(&page.ID, &page.WorkspaceID, &page.FolderID, &page.Title, &page.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan page summary: %w", err)
+		}
+		pages = append(pages, page)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate page summaries: %w", err)
+	}
+
+	return pages, nil
 }
 
 func (r PageRepository) UpdateMetadata(ctx context.Context, pageID string, title string, folderID *string, updatedAt time.Time) (domain.Page, error) {
@@ -132,30 +280,29 @@ func (r PageRepository) UpdateMetadata(ctx context.Context, pageID string, title
 }
 
 func (r PageRepository) UpdateDraft(ctx context.Context, pageID string, content json.RawMessage, lastEditedBy string, updatedAt time.Time) (domain.PageDraft, error) {
-	tx, err := r.db.Begin(ctx)
-	if err != nil {
-		return domain.PageDraft{}, fmt.Errorf("begin draft update transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	var pageExists bool
-	if err := tx.QueryRow(ctx, `SELECT TRUE FROM pages WHERE id = $1 AND deleted_at IS NULL`, pageID).Scan(&pageExists); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.PageDraft{}, domain.ErrNotFound
-		}
-		return domain.PageDraft{}, fmt.Errorf("verify page exists for draft update: %w", err)
-	}
-
 	searchBody := application.ExtractSearchBody(content)
-	updateDraftQuery := `
-		UPDATE page_drafts
-		SET content = $2, search_body = $3, last_edited_by = $4, updated_at = $5
-		WHERE page_id = $1
-		RETURNING page_id, content, search_body, last_edited_by, created_at, updated_at
+	query := `
+		WITH updated_draft AS (
+			UPDATE page_drafts AS d
+			SET content = $2, search_body = $3, last_edited_by = $5, updated_at = $4
+			FROM pages AS p
+			WHERE d.page_id = $1
+			  AND p.id = d.page_id
+			  AND p.deleted_at IS NULL
+			RETURNING d.page_id, d.content, d.search_body, d.last_edited_by, d.created_at, d.updated_at
+		), touched_page AS (
+			UPDATE pages AS p
+			SET updated_at = $4
+			FROM updated_draft AS d
+			WHERE p.id = d.page_id
+			RETURNING p.id
+		)
+		SELECT page_id, content, search_body, last_edited_by, created_at, updated_at
+		FROM updated_draft
 	`
 
 	var draft domain.PageDraft
-	if err := tx.QueryRow(ctx, updateDraftQuery, pageID, content, searchBody, lastEditedBy, updatedAt).Scan(
+	if err := r.db.QueryRow(ctx, query, pageID, content, searchBody, updatedAt, lastEditedBy).Scan(
 		&draft.PageID,
 		&draft.Content,
 		&draft.SearchBody,
@@ -169,27 +316,23 @@ func (r PageRepository) UpdateDraft(ctx context.Context, pageID string, content 
 		return domain.PageDraft{}, fmt.Errorf("update page draft: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, `UPDATE pages SET updated_at = $2 WHERE id = $1`, pageID, updatedAt); err != nil {
-		return domain.PageDraft{}, fmt.Errorf("touch page updated_at: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return domain.PageDraft{}, fmt.Errorf("commit draft update: %w", err)
-	}
-
 	return draft, nil
 }
 
 func (r PageRepository) SearchPages(ctx context.Context, workspaceID string, query string) ([]domain.PageSearchResult, error) {
 	searchQuery := `
+		WITH search_term AS (
+			SELECT plainto_tsquery('simple', $2) AS term
+		)
 		SELECT p.id, p.workspace_id, p.folder_id, p.title, p.updated_at
 		FROM pages p
 		JOIN page_drafts d ON d.page_id = p.id
+		CROSS JOIN search_term q
 		WHERE p.workspace_id = $1
 		  AND p.deleted_at IS NULL
 		  AND (
-			to_tsvector('simple', COALESCE(p.title, '')) @@ plainto_tsquery('simple', $2)
-			OR to_tsvector('simple', COALESCE(d.search_body, '')) @@ plainto_tsquery('simple', $2)
+			p.title_search @@ q.term
+			OR d.search_body_vector @@ q.term
 		  )
 		ORDER BY p.updated_at DESC, p.id ASC
 	`

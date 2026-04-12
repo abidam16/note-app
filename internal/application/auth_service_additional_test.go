@@ -87,6 +87,12 @@ func TestAuthHelpers(t *testing.T) {
 	if err := validatePassword("12345678"); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected validation error for missing letter, got %v", err)
 	}
+	if err := validatePassword("password1"); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected validation error for missing uppercase, got %v", err)
+	}
+	if err := validatePassword("PASSWORD1"); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected validation error for missing lowercase, got %v", err)
+	}
 	if err := validatePassword("Passw0rd"); err != nil {
 		t.Fatalf("expected valid password, got %v", err)
 	}

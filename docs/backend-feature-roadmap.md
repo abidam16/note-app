@@ -678,3 +678,36 @@
   - workspace rename works end-to-end
   - folder rename works end-to-end
   - folder create/rename both enforce sibling-name uniqueness
+
+### 26. Workspace and Folder Page Listing
+- Feature name: Workspace and folder page listing
+- Purpose: expose lightweight page summaries for workspace root and direct folder contents
+- Single use case: a client loads folders plus root pages for the workspace tree, then lazily loads direct pages for a selected folder
+- Dependencies: features 11, 12, 13, and 22
+- API endpoints:
+  - `GET /api/v1/workspaces/{workspaceID}/pages`
+- Request/response contract:
+  - Query: optional `folder_id`
+  - Omitted or blank `folder_id` returns workspace-root pages only
+  - Non-blank `folder_id` returns direct pages in that folder only
+  - Response `200`: ordered list of page summaries
+- Database changes:
+  - none
+- Business rules:
+  - any workspace member may list pages
+  - `folder_id` must reference an existing folder in the same workspace
+  - soft-deleted pages are excluded
+  - ordering is `updated_at DESC, id ASC`
+  - listing is non-recursive and does not include draft content
+- Error cases:
+  - non-member access
+  - missing folder
+  - folder from another workspace
+- Tests:
+  - handler tests for root listing, folder listing, and authorization
+  - service tests for folder validation and membership checks
+  - repository tests for scope filtering, deleted-page exclusion, and ordering
+- Done criteria:
+  - workspace root pages can be listed
+  - direct folder pages can be listed
+  - frontend contract documents the two-endpoint bootstrap pattern

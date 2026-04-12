@@ -1,14 +1,43 @@
 services:
-  postgres:
-    image: postgres:15
-    container_name: note-app-postgres
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: note-app-migrate
     environment:
-      POSTGRES_DB: noteapp
-      POSTGRES_USER: noteapp
-      POSTGRES_PASSWORD: noteapp
+      APP_ENV: ${APP_ENV:-production}
+      HTTP_PORT: ${HTTP_PORT:-8080}
+      POSTGRES_DSN: ${POSTGRES_DSN:-}
+      JWT_ISSUER: ${JWT_ISSUER:-note-app}
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-168h}
+      LOCAL_STORAGE_PATH: /app/tmp/storage
+    command: ["./migrate", "-direction", "up"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: note-app-api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      HTTP_PORT: ${HTTP_PORT:-8080}
+      POSTGRES_DSN: ${POSTGRES_DSN:-}
+      JWT_ISSUER: ${JWT_ISSUER:-note-app}
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-168h}
+      LOCAL_STORAGE_PATH: /app/tmp/storage
     ports:
-      - "5432:5432"
+      - "8080:8080"
+    restart: unless-stopped
     volumes:
-      - note_app_pg15_data:/var/lib/postgresql/data
+      - note_app_storage:/app/tmp/storage
+
 volumes:
-  note_app_pg15_data:
+  note_app_storage:

@@ -1,0 +1,31 @@
+{
+  "data": {
+    "id": "c8f5f6f6-9a56-4d1f-8ad8-76f6e0fcb101",
+    "workspace_id": "9b2c1a1f-7c3e-4db7-a1e5-8dbd3b20d101",
+    "type": "mention",
+    "actor_id": "22222222-2222-4222-8222-222222222222",
+    "actor": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "email": "ben.reviewer@example.com",
+      "full_name": "Ben Reviewer"
+    },
+    "title": "You were mentioned",
+    "content": "Ben mentioned you in a reply on Launch plan.",
+    "is_read": false,
+    "read_at": null,
+    "actionable": false,
+    "action_kind": null,
+    "resource_type": "thread_message",
+    "resource_id": "7f4f0b4b-1b0f-48d5-9f70-6c9c9c0cb201",
+    "payload": {
+      "thread_id": "5b5d7f5c-86d3-4ed5-93a8-8fcb5aa1b301",
+      "message_id": "7f4f0b4b-1b0f-48d5-9f70-6c9c9c0cb201",
+      "page_id": "3c58f3b0-24fe-4e55-bb2d-0a1c5f5e5101",
+      "workspace_id": "9b2c1a1f-7c3e-4db7-a1e5-8dbd3b20d101",
+      "event_topic": "thread_reply_created",
+      "mention_source": "explicit"
+    },
+    "created_at": "2026-04-10T09:15:00Z",
+    "updated_at": "2026-04-10T09:15:00Z"
+  }
+}

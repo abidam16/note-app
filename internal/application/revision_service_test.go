@@ -140,11 +140,20 @@ func TestRevisionServiceCompareRevisions(t *testing.T) {
 	if len(diff.Blocks[0].InlineDiff) == 0 {
 		t.Fatalf("expected inline diff for modified block")
 	}
+	if len(diff.Blocks[0].Lines) != 2 {
+		t.Fatalf("expected line-aware diff for modified block, got %+v", diff.Blocks[0].Lines)
+	}
 	if diff.Blocks[1].Status != "unchanged" {
 		t.Fatalf("expected second block unchanged, got %s", diff.Blocks[1].Status)
 	}
+	if len(diff.Blocks[1].Lines) != 1 || diff.Blocks[1].Lines[0].Operation != "context" {
+		t.Fatalf("expected unchanged block to expose context line, got %+v", diff.Blocks[1].Lines)
+	}
 	if diff.Blocks[2].Status != "added" {
 		t.Fatalf("expected third block added, got %s", diff.Blocks[2].Status)
+	}
+	if len(diff.Blocks[2].Lines) != 1 || diff.Blocks[2].Lines[0].Operation != "added" {
+		t.Fatalf("expected added block to expose added line, got %+v", diff.Blocks[2].Lines)
 	}
 }
 
@@ -216,6 +225,41 @@ func TestRevisionServiceRejectsViewerAndMissingPage(t *testing.T) {
 	_, err = service.ListRevisions(context.Background(), "user-2", "missing-page")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found error, got %v", err)
+	}
+}
+
+func TestRevisionServiceHidesForeignWorkspaceResources(t *testing.T) {
+	memberships := &fakeWorkspaceRepo{memberships: map[string][]domain.WorkspaceMember{
+		"workspace-1": {
+			{ID: "member-1", WorkspaceID: "workspace-1", UserID: "editor-1", Role: domain.RoleEditor},
+		},
+	}, invitations: map[string]domain.WorkspaceInvitation{}, owners: map[string]int{}}
+	pages := &fakePageRepo{
+		pages: map[string]domain.Page{
+			"page-1": {ID: "page-1", WorkspaceID: "workspace-1", Title: "Doc"},
+		},
+		drafts: map[string]domain.PageDraft{
+			"page-1": {PageID: "page-1", Content: json.RawMessage(`[{"type":"paragraph","children":[{"type":"text","text":"Saved draft"}]}]`)},
+		},
+	}
+	revisions := &fakeRevisionRepo{revisions: map[string]domain.Revision{
+		"rev-1": {ID: "rev-1", PageID: "page-1", Content: json.RawMessage(`[{"type":"paragraph","children":[{"type":"text","text":"Saved draft"}]}]`)},
+	}, ordered: []domain.Revision{
+		{ID: "rev-1", PageID: "page-1", Content: json.RawMessage(`[{"type":"paragraph","children":[{"type":"text","text":"Saved draft"}]}]`)},
+	}}
+	service := NewRevisionService(revisions, pages, memberships)
+
+	if _, err := service.CreateRevision(context.Background(), "outsider-1", CreateRevisionInput{PageID: "page-1"}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected not found for foreign page revision create, got %v", err)
+	}
+	if _, err := service.ListRevisions(context.Background(), "outsider-1", "page-1"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected not found for foreign page revision list, got %v", err)
+	}
+	if _, err := service.CompareRevisions(context.Background(), "outsider-1", CompareRevisionsInput{PageID: "page-1", FromRevisionID: "rev-1", ToRevisionID: "rev-1"}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected not found for foreign page revision compare, got %v", err)
+	}
+	if _, err := service.RestoreRevision(context.Background(), "outsider-1", RestoreRevisionInput{PageID: "page-1", RevisionID: "rev-1"}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected not found for foreign page revision restore, got %v", err)
 	}
 }
 

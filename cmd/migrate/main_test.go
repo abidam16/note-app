@@ -12,7 +12,10 @@ import (
 func TestRunUsesDefaultFlags(t *testing.T) {
 	called := false
 	deps := migrateDeps{
-		loadConfig: func() (config.Config, error) {
+		loadConfig: func(envFile string) (config.Config, error) {
+			if envFile != ".env" {
+				t.Fatalf("unexpected default env file: %s", envFile)
+			}
 			return config.Config{PostgresDSN: "postgres://example"}, nil
 		},
 		runMigrations: func(dsn, migrationsPath, direction string, steps int) error {
@@ -40,7 +43,10 @@ func TestRunUsesDefaultFlags(t *testing.T) {
 
 func TestRunParsesFlags(t *testing.T) {
 	deps := migrateDeps{
-		loadConfig: func() (config.Config, error) {
+		loadConfig: func(envFile string) (config.Config, error) {
+			if envFile != ".env.test" {
+				t.Fatalf("unexpected env file: %s", envFile)
+			}
 			return config.Config{PostgresDSN: "postgres://example"}, nil
 		},
 		runMigrations: func(_ string, _ string, direction string, steps int) error {
@@ -51,7 +57,7 @@ func TestRunParsesFlags(t *testing.T) {
 		},
 	}
 
-	if err := run([]string{"-direction", "down", "-steps", "3"}, deps); err != nil {
+	if err := run([]string{"-env-file", ".env.test", "-direction", "down", "-steps", "3"}, deps); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 }
@@ -60,7 +66,7 @@ func TestRunPreflight(t *testing.T) {
 	migrationCalled := false
 	preflightCalled := false
 	deps := migrateDeps{
-		loadConfig: func() (config.Config, error) {
+		loadConfig: func(string) (config.Config, error) {
 			return config.Config{PostgresDSN: "postgres://example"}, nil
 		},
 		runMigrations: func(string, string, string, int) error {
@@ -89,7 +95,7 @@ func TestRunPreflight(t *testing.T) {
 
 func TestRunFlagParseError(t *testing.T) {
 	deps := migrateDeps{
-		loadConfig: func() (config.Config, error) {
+		loadConfig: func(string) (config.Config, error) {
 			return config.Config{}, nil
 		},
 		runMigrations: func(string, string, string, int) error {
@@ -104,7 +110,7 @@ func TestRunFlagParseError(t *testing.T) {
 
 func TestRunUnsupportedPreflightAndMissingDependency(t *testing.T) {
 	deps := migrateDeps{
-		loadConfig: func() (config.Config, error) {
+		loadConfig: func(string) (config.Config, error) {
 			return config.Config{PostgresDSN: "postgres://example"}, nil
 		},
 		runMigrations: func(string, string, string, int) error {
@@ -123,7 +129,7 @@ func TestRunUnsupportedPreflightAndMissingDependency(t *testing.T) {
 func TestRunConfigAndMigrationErrors(t *testing.T) {
 	cfgErr := errors.New("config failed")
 	deps := migrateDeps{
-		loadConfig: func() (config.Config, error) {
+		loadConfig: func(string) (config.Config, error) {
 			return config.Config{}, cfgErr
 		},
 		runMigrations: func(string, string, string, int) error {
@@ -136,7 +142,7 @@ func TestRunConfigAndMigrationErrors(t *testing.T) {
 
 	migErr := errors.New("migrate failed")
 	deps = migrateDeps{
-		loadConfig: func() (config.Config, error) {
+		loadConfig: func(string) (config.Config, error) {
 			return config.Config{PostgresDSN: "postgres://example"}, nil
 		},
 		runMigrations: func(string, string, string, int) error {
@@ -149,7 +155,7 @@ func TestRunConfigAndMigrationErrors(t *testing.T) {
 
 	preflightErr := errors.New("preflight failed")
 	deps = migrateDeps{
-		loadConfig: func() (config.Config, error) {
+		loadConfig: func(string) (config.Config, error) {
 			return config.Config{PostgresDSN: "postgres://example"}, nil
 		},
 		runFolderSiblingUniquenessPreflight: func(string) error {

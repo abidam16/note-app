@@ -239,19 +239,23 @@ func validatePassword(password string) error {
 		return fmt.Errorf("%w: password must be at least 8 characters", domain.ErrValidation)
 	}
 
-	hasLetter := false
+	hasUpper := false
+	hasLower := false
 	hasNumber := false
 	for _, r := range password {
 		if r >= '0' && r <= '9' {
 			hasNumber = true
 		}
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-			hasLetter = true
+		if r >= 'a' && r <= 'z' {
+			hasLower = true
+		}
+		if r >= 'A' && r <= 'Z' {
+			hasUpper = true
 		}
 	}
 
-	if !hasLetter || !hasNumber {
-		return fmt.Errorf("%w: password must contain letters and numbers", domain.ErrValidation)
+	if !hasUpper || !hasLower || !hasNumber {
+		return fmt.Errorf("%w: password must contain uppercase, lowercase, and numbers", domain.ErrValidation)
 	}
 
 	return nil

@@ -2,6 +2,8 @@ package auth
 
 import "golang.org/x/crypto/bcrypt"
 
+const defaultBcryptCost = 12
+
 type PasswordManager struct{}
 
 func NewPasswordManager() PasswordManager {
@@ -9,7 +11,7 @@ func NewPasswordManager() PasswordManager {
 }
 
 func (PasswordManager) Hash(password string) (string, error) {
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), defaultBcryptCost)
 	if err != nil {
 		return "", err
 	}

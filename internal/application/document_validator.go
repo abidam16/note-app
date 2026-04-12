@@ -1,9 +1,11 @@
 package application
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"note-app/internal/domain"
@@ -28,8 +30,36 @@ const (
 	markLink       = "link"
 )
 
+type parsedDocumentBlock struct {
+	ID       *string         `json:"id"`
+	Type     string          `json:"type"`
+	Text     *string         `json:"text"`
+	Children json.RawMessage `json:"children"`
+	Level    *int            `json:"level"`
+	Items    json.RawMessage `json:"items"`
+	Start    *int            `json:"start"`
+	Language *string         `json:"language"`
+	Rows     json.RawMessage `json:"rows"`
+	Src      *string         `json:"src"`
+	Alt      *string         `json:"alt"`
+}
+
+type parsedTextContainer struct {
+	Text     *string         `json:"text"`
+	Children json.RawMessage `json:"children"`
+}
+
+type parsedListItem struct {
+	parsedTextContainer
+	Checked *bool `json:"checked"`
+}
+
+type parsedTableRow struct {
+	Cells json.RawMessage `json:"cells"`
+}
+
 func ValidateDocument(content json.RawMessage) error {
-	if len(strings.TrimSpace(string(content))) == 0 {
+	if len(bytes.TrimSpace(content)) == 0 {
 		return fmt.Errorf("%w: content is required", domain.ErrValidation)
 	}
 
@@ -39,8 +69,145 @@ func ValidateDocument(content json.RawMessage) error {
 	}
 
 	for i, rawBlock := range blocks {
-		if err := validateBlock(rawBlock, fmt.Sprintf("blocks[%d]", i)); err != nil {
+		// Decode each block into a compact typed view once. The older map-based path
+		// was easier to branch on, but it paid for repeated field-level unmarshalling.
+		var block parsedDocumentBlock
+		if err := json.Unmarshal(rawBlock, &block); err != nil {
+			return fmt.Errorf("%w: blocks[%d] must be an object", domain.ErrValidation, i)
+		}
+		if err := validateParsedBlock(block, "blocks["+strconv.Itoa(i)+"]"); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+func ValidateDocumentThreadAnchorsReady(content json.RawMessage) error {
+	if len(bytes.TrimSpace(content)) == 0 {
+		return fmt.Errorf("%w: content is required", domain.ErrValidation)
+	}
+
+	var blocks []parsedDocumentBlock
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		return fmt.Errorf("%w: content must be a JSON array of blocks", domain.ErrValidation)
+	}
+
+	for i, block := range blocks {
+		path := "blocks[" + strconv.Itoa(i) + "]"
+		if block.ID == nil || strings.TrimSpace(*block.ID) == "" {
+			return fmt.Errorf("%w: %s.id is required for comment threads", domain.ErrValidation, path)
+		}
+	}
+
+	return nil
+}
+
+func validateParsedBlock(block parsedDocumentBlock, path string) error {
+	switch block.Type {
+	case "":
+		return fmt.Errorf("%w: %s.type is required", domain.ErrValidation, path)
+	case blockParagraph, blockQuote:
+		return validateParsedTextContainer(parsedTextContainer{Text: block.Text, Children: block.Children}, path)
+	case blockHeading:
+		if block.Level == nil {
+			return fmt.Errorf("%w: %s.level is required", domain.ErrValidation, path)
+		}
+		if *block.Level < 1 || *block.Level > 6 {
+			return fmt.Errorf("%w: %s.level must be between %d and %d", domain.ErrValidation, path, 1, 6)
+		}
+		return validateParsedTextContainer(parsedTextContainer{Text: block.Text, Children: block.Children}, path)
+	case blockBulletList:
+		return validateParsedListItems(block.Items, path, false)
+	case blockNumberedList:
+		if block.Start != nil && *block.Start < 1 {
+			return fmt.Errorf("%w: %s.start must be greater than or equal to %d", domain.ErrValidation, path, 1)
+		}
+		return validateParsedListItems(block.Items, path, false)
+	case blockTaskList:
+		return validateParsedListItems(block.Items, path, true)
+	case blockCodeBlock:
+		if block.Text == nil {
+			return fmt.Errorf("%w: %s.text is required", domain.ErrValidation, path)
+		}
+		return nil
+	case blockTable:
+		return validateParsedTable(block.Rows, path)
+	case blockImage:
+		if block.Src == nil {
+			return fmt.Errorf("%w: %s.src is required", domain.ErrValidation, path)
+		}
+		if strings.TrimSpace(*block.Src) == "" {
+			return fmt.Errorf("%w: %s.src is required", domain.ErrValidation, path)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: %s has unsupported block type %q", domain.ErrValidation, path, block.Type)
+	}
+}
+
+func validateParsedTextContainer(container parsedTextContainer, path string) error {
+	hasText := container.Text != nil
+	hasChildren := container.Children != nil
+	if hasText == hasChildren {
+		return fmt.Errorf("%w: %s must define exactly one of text or children", domain.ErrValidation, path)
+	}
+
+	if hasChildren {
+		return validateInlineNodes(container.Children, path+".children")
+	}
+
+	return nil
+}
+
+func validateParsedListItems(raw json.RawMessage, path string, requireChecked bool) error {
+	if raw == nil {
+		return fmt.Errorf("%w: %s.items is required", domain.ErrValidation, path)
+	}
+
+	var items []parsedListItem
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return fmt.Errorf("%w: %s.items must be an array", domain.ErrValidation, path)
+	}
+
+	for i, item := range items {
+		itemPath := path + ".items[" + strconv.Itoa(i) + "]"
+		if requireChecked && item.Checked == nil {
+			return fmt.Errorf("%w: %s.checked is required", domain.ErrValidation, itemPath)
+		}
+		if err := validateParsedTextContainer(item.parsedTextContainer, itemPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateParsedTable(raw json.RawMessage, path string) error {
+	if raw == nil {
+		return fmt.Errorf("%w: %s.rows is required", domain.ErrValidation, path)
+	}
+
+	var rows []parsedTableRow
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return fmt.Errorf("%w: %s.rows must be an array", domain.ErrValidation, path)
+	}
+
+	for i, row := range rows {
+		rowPath := path + ".rows[" + strconv.Itoa(i) + "]"
+		if row.Cells == nil {
+			return fmt.Errorf("%w: %s.cells is required", domain.ErrValidation, rowPath)
+		}
+
+		var cells []parsedTextContainer
+		if err := json.Unmarshal(row.Cells, &cells); err != nil {
+			return fmt.Errorf("%w: %s.cells must be an array", domain.ErrValidation, rowPath)
+		}
+
+		for j, cell := range cells {
+			if err := validateParsedTextContainer(cell, rowPath+".cells["+strconv.Itoa(j)+"]"); err != nil {
+				return err
+			}
 		}
 	}
 

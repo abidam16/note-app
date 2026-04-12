@@ -8,15 +8,20 @@ import (
 	"testing"
 	"time"
 
+	"note-app/internal/testutil/testenv"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func testDSN() string {
-	if dsn := os.Getenv("POSTGRES_DSN"); dsn != "" {
-		return dsn
+func testDSN(t *testing.T) string {
+	t.Helper()
+
+	dsn, err := testenv.ResolvePostgresDSN(projectRoot(t))
+	if err != nil {
+		t.Fatalf("resolve postgres test dsn: %v", err)
 	}
-	return "postgres://noteapp:noteapp@localhost:5432/noteapp?sslmode=disable"
+	return dsn
 }
 
 func projectRoot(t *testing.T) string {
@@ -36,15 +41,15 @@ func TestNewPool(t *testing.T) {
 		t.Fatal("expected parse config error")
 	}
 
-	pool, err := NewPool(ctx, testDSN())
+	pool, err := NewPool(ctx, testDSN(t))
 	if err != nil {
-		t.Fatalf("new pool should connect with local dsn: %v", err)
+		t.Fatalf("new pool should connect with configured test dsn: %v", err)
 	}
 	pool.Close()
 
 	canceledCtx, cancelNow := context.WithCancel(context.Background())
 	cancelNow()
-	if _, err := NewPool(canceledCtx, testDSN()); err == nil {
+	if _, err := NewPool(canceledCtx, testDSN(t)); err == nil {
 		t.Fatal("expected ping failure with canceled context")
 	}
 }
@@ -60,7 +65,7 @@ func TestRunMigrations(t *testing.T) {
 		t.Fatalf("chdir project root: %v", err)
 	}
 
-	dsn := testDSN()
+	dsn := testDSN(t)
 	if err := RunMigrations(dsn, "migrations", "up", 0); err != nil {
 		t.Fatalf("up migrations should succeed: %v", err)
 	}
@@ -89,7 +94,7 @@ func TestRunMigrationsDownPaths(t *testing.T) {
 		t.Fatalf("chdir project root: %v", err)
 	}
 
-	dsn := testDSN()
+	dsn := testDSN(t)
 
 	if err := RunMigrations(dsn, "migrations", "up", 0); err != nil {
 		t.Fatalf("setup up migrations should succeed: %v", err)
@@ -127,7 +132,7 @@ func TestRunMigrationsUpDirtyDatabaseError(t *testing.T) {
 		t.Fatalf("chdir project root: %v", err)
 	}
 
-	dsn := testDSN()
+	dsn := testDSN(t)
 	if err := RunMigrations(dsn, "migrations", "up", 0); err != nil {
 		t.Fatalf("setup up migrations should succeed: %v", err)
 	}

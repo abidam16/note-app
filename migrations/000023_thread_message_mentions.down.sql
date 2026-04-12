@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS page_comment_message_mentions_user_message_idx;
+DROP TABLE IF EXISTS page_comment_message_mentions;

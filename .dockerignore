@@ -1,0 +1,15 @@
+.git
+.gitignore
+.idea
+.gocache
+.gomodcache
+.gotmp
+tmp
+coverage
+coverage.out
+*.cov
+*.exe
+*.out
+test_write.tmp
+frontend-repo
+docs

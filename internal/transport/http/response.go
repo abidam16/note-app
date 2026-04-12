@@ -2,9 +2,16 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+)
+
+const (
+	defaultJSONBodyLimitBytes  int64 = 1 << 20
+	documentJSONBodyLimitBytes int64 = 8 << 20
 )
 
 type successEnvelope struct {
@@ -38,8 +45,28 @@ func WriteError(w http.ResponseWriter, r *http.Request, status int, apiErr APIEr
 	_ = json.NewEncoder(w).Encode(errorEnvelope{Error: apiErr})
 }
 
-func DecodeJSON(r *http.Request, dest any) error {
+func DecodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
+	return DecodeJSONWithLimit(w, r, dest, defaultJSONBodyLimitBytes)
+}
+
+func DecodeJSONWithLimit(w http.ResponseWriter, r *http.Request, dest any, maxBytes int64) error {
+	if maxBytes <= 0 {
+		maxBytes = defaultJSONBodyLimitBytes
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(dest)
+	if err := decoder.Decode(dest); err != nil {
+		return err
+	}
+
+	var trailing any
+	if err := decoder.Decode(&trailing); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+
+	return errors.New("request body must contain a single JSON value")
 }

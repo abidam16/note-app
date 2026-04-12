@@ -15,6 +15,8 @@ import (
 type PageRepository interface {
 	CreateWithDraft(ctx context.Context, page domain.Page, draft domain.PageDraft) (domain.Page, domain.PageDraft, error)
 	GetByID(ctx context.Context, pageID string) (domain.Page, domain.PageDraft, error)
+	GetTrashedByTrashItemID(ctx context.Context, trashItemID string) (domain.TrashItem, domain.Page, domain.PageDraft, error)
+	ListByWorkspaceIDAndFolderID(ctx context.Context, workspaceID string, folderID *string) ([]domain.PageSummary, error)
 	UpdateMetadata(ctx context.Context, pageID string, title string, folderID *string, updatedAt time.Time) (domain.Page, error)
 	UpdateDraft(ctx context.Context, pageID string, content json.RawMessage, lastEditedBy string, updatedAt time.Time) (domain.PageDraft, error)
 	SoftDelete(ctx context.Context, trashItem domain.TrashItem) error
@@ -49,18 +51,31 @@ type RestoreTrashItemInput struct {
 	TrashItemID string
 }
 
-type PageService struct {
-	pages       PageRepository
-	memberships WorkspaceMembershipReader
-	folders     FolderRepository
+type GetTrashPageInput struct {
+	TrashItemID string
 }
 
-func NewPageService(pages PageRepository, memberships WorkspaceMembershipReader, folders FolderRepository) PageService {
-	return PageService{
+type ThreadAnchorReevaluator interface {
+	ReevaluatePageAnchors(ctx context.Context, pageID string, content json.RawMessage, reevaluation domain.ThreadAnchorReevaluationContext) error
+}
+
+type PageService struct {
+	pages         PageRepository
+	memberships   WorkspaceMembershipReader
+	folders       FolderRepository
+	threadAnchors ThreadAnchorReevaluator
+}
+
+func NewPageService(pages PageRepository, memberships WorkspaceMembershipReader, folders FolderRepository, threadAnchors ...ThreadAnchorReevaluator) PageService {
+	service := PageService{
 		pages:       pages,
 		memberships: memberships,
 		folders:     folders,
 	}
+	if len(threadAnchors) > 0 {
+		service.threadAnchors = threadAnchors[0]
+	}
+	return service
 }
 
 func (s PageService) CreatePage(ctx context.Context, actorID string, input CreatePageInput) (domain.Page, domain.PageDraft, error) {
@@ -104,27 +119,31 @@ func (s PageService) CreatePage(ctx context.Context, actorID string, input Creat
 }
 
 func (s PageService) GetPage(ctx context.Context, actorID, pageID string) (domain.Page, domain.PageDraft, error) {
-	page, draft, err := s.pages.GetByID(ctx, pageID)
+	return loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, pageID)
+}
+
+func (s PageService) ListPages(ctx context.Context, actorID, workspaceID string, folderID *string) ([]domain.PageSummary, error) {
+	if _, err := s.memberships.GetMembershipByUserID(ctx, workspaceID, actorID); err != nil {
+		return nil, err
+	}
+
+	resolvedFolderID, err := s.resolveFolderID(ctx, workspaceID, folderID)
 	if err != nil {
-		return domain.Page{}, domain.PageDraft{}, err
+		return nil, err
 	}
 
-	if _, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID); err != nil {
-		return domain.Page{}, domain.PageDraft{}, err
-	}
-
-	return page, draft, nil
+	return s.pages.ListByWorkspaceIDAndFolderID(ctx, workspaceID, resolvedFolderID)
 }
 
 func (s PageService) UpdatePage(ctx context.Context, actorID string, input UpdatePageInput) (domain.Page, error) {
-	page, _, err := s.pages.GetByID(ctx, input.PageID)
+	page, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, input.PageID)
 	if err != nil {
 		return domain.Page{}, err
 	}
 
 	membership, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID)
 	if err != nil {
-		return domain.Page{}, err
+		return domain.Page{}, hideForeignResourceMembershipError(err)
 	}
 	if membership.Role == domain.RoleViewer {
 		return domain.Page{}, domain.ErrForbidden
@@ -152,14 +171,14 @@ func (s PageService) UpdatePage(ctx context.Context, actorID string, input Updat
 }
 
 func (s PageService) UpdateDraft(ctx context.Context, actorID string, input UpdateDraftInput) (domain.PageDraft, error) {
-	page, _, err := s.pages.GetByID(ctx, input.PageID)
+	page, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, input.PageID)
 	if err != nil {
 		return domain.PageDraft{}, err
 	}
 
 	membership, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID)
 	if err != nil {
-		return domain.PageDraft{}, err
+		return domain.PageDraft{}, hideForeignResourceMembershipError(err)
 	}
 	if membership.Role == domain.RoleViewer {
 		return domain.PageDraft{}, domain.ErrForbidden
@@ -170,19 +189,33 @@ func (s PageService) UpdateDraft(ctx context.Context, actorID string, input Upda
 	if err := ValidateDocument(input.Content); err != nil {
 		return domain.PageDraft{}, err
 	}
+	if err := ValidateDocumentThreadAnchorsReady(input.Content); err != nil {
+		return domain.PageDraft{}, err
+	}
 
-	return s.pages.UpdateDraft(ctx, page.ID, input.Content, actorID, time.Now().UTC())
+	draft, err := s.pages.UpdateDraft(ctx, page.ID, input.Content, actorID, time.Now().UTC())
+	if err != nil {
+		return domain.PageDraft{}, err
+	}
+
+	if s.threadAnchors != nil {
+		if err := s.threadAnchors.ReevaluatePageAnchors(ctx, page.ID, draft.Content, domain.ThreadAnchorReevaluationContext{Reason: domain.PageCommentThreadEventReasonDraftUpdated}); err != nil {
+			return domain.PageDraft{}, err
+		}
+	}
+
+	return draft, nil
 }
 
 func (s PageService) DeletePage(ctx context.Context, actorID string, input DeletePageInput) error {
-	page, _, err := s.pages.GetByID(ctx, input.PageID)
+	page, _, err := loadVisiblePageForActor(ctx, s.pages, s.memberships, actorID, input.PageID)
 	if err != nil {
 		return err
 	}
 
 	membership, err := s.memberships.GetMembershipByUserID(ctx, page.WorkspaceID, actorID)
 	if err != nil {
-		return err
+		return hideForeignResourceMembershipError(err)
 	}
 	if membership.Role == domain.RoleViewer {
 		return domain.ErrForbidden
@@ -197,7 +230,17 @@ func (s PageService) DeletePage(ctx context.Context, actorID string, input Delet
 		DeletedAt:   time.Now().UTC(),
 	}
 
-	return s.pages.SoftDelete(ctx, trashItem)
+	if err := s.pages.SoftDelete(ctx, trashItem); err != nil {
+		return err
+	}
+
+	if s.threadAnchors != nil {
+		if err := s.threadAnchors.ReevaluatePageAnchors(ctx, page.ID, json.RawMessage("[]"), domain.ThreadAnchorReevaluationContext{Reason: domain.PageCommentThreadEventReasonPageDeleted}); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s PageService) ListTrash(ctx context.Context, actorID, workspaceID string) ([]domain.TrashItem, error) {
@@ -208,6 +251,19 @@ func (s PageService) ListTrash(ctx context.Context, actorID, workspaceID string)
 	return s.pages.ListTrashByWorkspaceID(ctx, workspaceID)
 }
 
+func (s PageService) GetTrashPage(ctx context.Context, actorID string, input GetTrashPageInput) (domain.TrashItem, domain.Page, domain.PageDraft, error) {
+	trashItem, page, draft, err := s.pages.GetTrashedByTrashItemID(ctx, input.TrashItemID)
+	if err != nil {
+		return domain.TrashItem{}, domain.Page{}, domain.PageDraft{}, err
+	}
+
+	if _, err := s.memberships.GetMembershipByUserID(ctx, trashItem.WorkspaceID, actorID); err != nil {
+		return domain.TrashItem{}, domain.Page{}, domain.PageDraft{}, hideForeignResourceMembershipError(err)
+	}
+
+	return trashItem, page, draft, nil
+}
+
 func (s PageService) RestoreTrashItem(ctx context.Context, actorID string, input RestoreTrashItemInput) (domain.Page, error) {
 	trashItem, err := s.pages.GetTrashItemByID(ctx, input.TrashItemID)
 	if err != nil {
@@ -216,13 +272,33 @@ func (s PageService) RestoreTrashItem(ctx context.Context, actorID string, input
 
 	membership, err := s.memberships.GetMembershipByUserID(ctx, trashItem.WorkspaceID, actorID)
 	if err != nil {
-		return domain.Page{}, err
+		return domain.Page{}, hideForeignResourceMembershipError(err)
 	}
 	if membership.Role == domain.RoleViewer {
 		return domain.Page{}, domain.ErrForbidden
 	}
 
-	return s.pages.RestoreTrashItem(ctx, input.TrashItemID, actorID, time.Now().UTC())
+	var restoredDraft domain.PageDraft
+	if s.threadAnchors != nil {
+		_, _, draft, err := s.pages.GetTrashedByTrashItemID(ctx, input.TrashItemID)
+		if err != nil {
+			return domain.Page{}, err
+		}
+		restoredDraft = draft
+	}
+
+	page, err := s.pages.RestoreTrashItem(ctx, input.TrashItemID, actorID, time.Now().UTC())
+	if err != nil {
+		return domain.Page{}, err
+	}
+
+	if s.threadAnchors != nil {
+		if err := s.threadAnchors.ReevaluatePageAnchors(ctx, page.ID, restoredDraft.Content, domain.ThreadAnchorReevaluationContext{Reason: domain.PageCommentThreadEventReasonPageRestored}); err != nil {
+			return domain.Page{}, err
+		}
+	}
+
+	return page, nil
 }
 
 func (s PageService) resolveFolderID(ctx context.Context, workspaceID string, inputFolderID *string) (*string, error) {

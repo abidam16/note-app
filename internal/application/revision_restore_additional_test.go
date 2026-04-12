@@ -64,6 +64,22 @@ func (s restoreMembershipStub) ListMembers(context.Context, string) ([]domain.Wo
 	return nil, nil
 }
 
+type restoreThreadReevaluatorStub struct {
+	called  bool
+	pageID  string
+	content json.RawMessage
+	context domain.ThreadAnchorReevaluationContext
+	err     error
+}
+
+func (s *restoreThreadReevaluatorStub) ReevaluatePageAnchors(_ context.Context, pageID string, content json.RawMessage, reevaluation domain.ThreadAnchorReevaluationContext) error {
+	s.called = true
+	s.pageID = pageID
+	s.content = append(json.RawMessage(nil), content...)
+	s.context = reevaluation
+	return s.err
+}
+
 func TestRestoreRevisionAdditionalBranches(t *testing.T) {
 	page := domain.Page{ID: "p1", WorkspaceID: "w1", Title: "Doc"}
 	validRevision := domain.Revision{ID: "r1", PageID: "p1", Content: json.RawMessage(`[{"type":"paragraph","text":"old"}]`)}
@@ -145,6 +161,40 @@ func TestRestoreRevisionAdditionalBranches(t *testing.T) {
 		)
 		if _, err := svc.RestoreRevision(context.Background(), "u1", RestoreRevisionInput{PageID: "p1", RevisionID: "r1"}); err == nil || err.Error() != "create failed" {
 			t.Fatalf("expected create revision error, got %v", err)
+		}
+	})
+
+	t.Run("reevaluates anchors after restore update", func(t *testing.T) {
+		reevaluator := &restoreThreadReevaluatorStub{}
+		svc := NewRevisionService(
+			restoreRevisionRepoStub{
+				getByIDFn: func(context.Context, string) (domain.Revision, error) { return validRevision, nil },
+				createFn:  func(_ context.Context, revision domain.Revision) (domain.Revision, error) { return revision, nil },
+			},
+			restorePageRepoStub{
+				getByIDFn: func(context.Context, string) (domain.Page, domain.PageDraft, error) {
+					return page, domain.PageDraft{}, nil
+				},
+				updateDraftFn: func(_ context.Context, pageID string, content json.RawMessage, actor string, updatedAt time.Time) (domain.PageDraft, error) {
+					return domain.PageDraft{PageID: pageID, Content: content, LastEditedBy: actor, UpdatedAt: updatedAt}, nil
+				},
+			},
+			restoreMembershipStub{getFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
+				return domain.WorkspaceMember{Role: domain.RoleEditor}, nil
+			}},
+			reevaluator,
+		)
+		if _, err := svc.RestoreRevision(context.Background(), "u1", RestoreRevisionInput{PageID: "p1", RevisionID: "r1"}); err != nil {
+			t.Fatalf("expected restore success, got %v", err)
+		}
+		if !reevaluator.called || reevaluator.pageID != "p1" || string(reevaluator.content) != string(validRevision.Content) {
+			t.Fatalf("expected reevaluator call with restored content, got called=%t page=%s content=%s", reevaluator.called, reevaluator.pageID, string(reevaluator.content))
+		}
+		if reevaluator.context.Reason != domain.PageCommentThreadEventReasonRevisionRestore {
+			t.Fatalf("expected revision_restored reason, got %s", reevaluator.context.Reason)
+		}
+		if reevaluator.context.RevisionID == nil || *reevaluator.context.RevisionID != "r1" {
+			t.Fatalf("expected revision id linkage, got %+v", reevaluator.context.RevisionID)
 		}
 	})
 }

@@ -68,11 +68,8 @@ func (m TokenManager) GenerateAccessToken(userID, email string, now time.Time) (
 
 func (m TokenManager) ParseAccessToken(token string) (*Claims, error) {
 	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(parsed *jwt.Token) (any, error) {
-		if _, ok := parsed.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
 		return m.secret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuer(m.issuer))
 	if err != nil {
 		return nil, err
 	}

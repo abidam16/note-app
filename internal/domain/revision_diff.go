@@ -13,11 +13,20 @@ type RevisionDiffBlock struct {
 	From       *RevisionDiffSnapshot   `json:"from,omitempty"`
 	To         *RevisionDiffSnapshot   `json:"to,omitempty"`
 	InlineDiff []RevisionDiffTextChunk `json:"inline_diff,omitempty"`
+	Lines      []RevisionDiffLine      `json:"lines,omitempty"`
 }
 
 type RevisionDiffSnapshot struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
+}
+
+type RevisionDiffLine struct {
+	Operation      string                  `json:"operation"`
+	FromLineNumber *int                    `json:"from_line_number,omitempty"`
+	ToLineNumber   *int                    `json:"to_line_number,omitempty"`
+	Text           string                  `json:"text"`
+	Chunks         []RevisionDiffTextChunk `json:"chunks,omitempty"`
 }
 
 type RevisionDiffTextChunk struct {

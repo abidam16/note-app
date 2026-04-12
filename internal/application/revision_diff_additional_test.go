@@ -27,6 +27,12 @@ func TestRevisionDiffHelpers(t *testing.T) {
 	if blocks[0].Status != "modified" || len(blocks[0].InlineDiff) == 0 {
 		t.Fatalf("expected first block modified with inline diff, got %+v", blocks[0])
 	}
+	if len(blocks[0].Lines) != 2 {
+		t.Fatalf("expected first block to expose removed and added line entries, got %+v", blocks[0].Lines)
+	}
+	if blocks[0].Lines[0].Operation != "removed" || blocks[0].Lines[1].Operation != "added" {
+		t.Fatalf("expected first block line ops to show modified pair, got %+v", blocks[0].Lines)
+	}
 	if blocks[1].Status != "unchanged" {
 		t.Fatalf("expected second block unchanged, got %s", blocks[1].Status)
 	}
@@ -100,9 +106,80 @@ func TestRevisionDiffHelpers(t *testing.T) {
 		t.Fatalf("expected multiple diff chunks, got %+v", chunks)
 	}
 
-	merged := appendWordChunk(nil, "added", "one")
-	merged = appendWordChunk(merged, "added", "two")
-	if len(merged) != 1 || merged[0].Text != "one two" {
+	merged := appendTextChunk(nil, "added", "one")
+	merged = appendTextChunk(merged, "added", "two")
+	if len(merged) != 1 || merged[0].Text != "onetwo" {
 		t.Fatalf("expected chunk merge, got %+v", merged)
 	}
+}
+
+func TestRevisionDiffLinesStayAlignedAfterDeletion(t *testing.T) {
+	blocks, err := buildRevisionDiffBlocks(
+		json.RawMessage(`[{"type":"code_block","text":"line 1\nline 2\nline 3\nline 4\nline 5"}]`),
+		json.RawMessage(`[{"type":"code_block","text":"line 1\nline 2\nline 4\nline 5"}]`),
+	)
+	if err != nil {
+		t.Fatalf("buildRevisionDiffBlocks error: %v", err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected one diff block, got %d", len(blocks))
+	}
+	if blocks[0].Status != "modified" {
+		t.Fatalf("expected modified block, got %s", blocks[0].Status)
+	}
+	if len(blocks[0].Lines) != 5 {
+		t.Fatalf("expected five aligned diff lines, got %+v", blocks[0].Lines)
+	}
+
+	assertLine := func(idx int, operation string, fromLine, toLine *int, text string) {
+		t.Helper()
+		line := blocks[0].Lines[idx]
+		if line.Operation != operation || line.Text != text {
+			t.Fatalf("unexpected line[%d]: %+v", idx, line)
+		}
+		if !sameOptionalInt(line.FromLineNumber, fromLine) || !sameOptionalInt(line.ToLineNumber, toLine) {
+			t.Fatalf("unexpected line numbers at [%d]: %+v", idx, line)
+		}
+	}
+
+	assertLine(0, "context", intPtr(1), intPtr(1), "line 1")
+	assertLine(1, "context", intPtr(2), intPtr(2), "line 2")
+	assertLine(2, "removed", intPtr(3), nil, "line 3")
+	assertLine(3, "context", intPtr(4), intPtr(3), "line 4")
+	assertLine(4, "context", intPtr(5), intPtr(4), "line 5")
+}
+
+func TestRevisionDiffIgnoresEditorBlockIDsWhenAligning(t *testing.T) {
+	blocks, err := buildRevisionDiffBlocks(
+		json.RawMessage(`[
+			{"id":"old-1","type":"paragraph","children":[{"type":"text","text":"Empty"}]},
+			{"id":"old-2","type":"paragraph","children":[{"type":"text","text":"dkkslsl"}]}
+		]`),
+		json.RawMessage(`[
+			{"id":"new-1","type":"paragraph","children":[{"type":"text","text":"dkkslsl"}]},
+			{"id":"new-2","type":"paragraph","children":[{"type":"text","text":"alsdjflaslkdfj"}]}
+		]`),
+	)
+	if err != nil {
+		t.Fatalf("buildRevisionDiffBlocks error: %v", err)
+	}
+	if len(blocks) != 3 {
+		t.Fatalf("expected remove, unchanged, add; got %+v", blocks)
+	}
+	if blocks[0].Status != "removed" || blocks[0].From == nil || blocks[0].From.Text != "Empty" {
+		t.Fatalf("expected first block removed old Empty, got %+v", blocks[0])
+	}
+	if blocks[1].Status != "unchanged" || blocks[1].From == nil || blocks[1].To == nil || blocks[1].From.Text != "dkkslsl" || blocks[1].To.Text != "dkkslsl" {
+		t.Fatalf("expected second block unchanged dkkslsl, got %+v", blocks[1])
+	}
+	if blocks[2].Status != "added" || blocks[2].To == nil || blocks[2].To.Text != "alsdjflaslkdfj" {
+		t.Fatalf("expected third block added new line, got %+v", blocks[2])
+	}
+}
+
+func sameOptionalInt(got, want *int) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return *got == *want
 }

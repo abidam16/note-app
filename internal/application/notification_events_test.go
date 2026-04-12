@@ -48,6 +48,12 @@ func TestWorkspaceServiceInvitePublishesNotificationEvent(t *testing.T) {
 	if len(publisher.invitations) != 1 || publisher.invitations[0].ID != invitation.ID {
 		t.Fatalf("expected invitation publish event, got %+v", publisher.invitations)
 	}
+	if publisher.invitations[0].Status != domain.WorkspaceInvitationStatusPending {
+		t.Fatalf("expected pending invitation publish payload, got %+v", publisher.invitations[0])
+	}
+	if publisher.invitations[0].Version != 1 {
+		t.Fatalf("expected version 1 invitation publish payload, got %+v", publisher.invitations[0])
+	}
 }
 
 func TestCommentServiceCreatePublishesNotificationEvent(t *testing.T) {

@@ -9,6 +9,7 @@ Latest completed roadmap feature:
 Latest completed post-roadmap backend feature:
 - Workspace rename and folder rename
 - Folder sibling-name uniqueness enforced for both create and rename
+- Workspace and folder page listing
 
 Current next strict roadmap feature:
 - None (backend roadmap features 1-23 are complete)
@@ -33,6 +34,33 @@ What was completed in this session (post-roadmap hardening):
 - Added migration rollout guard:
   - `go run ./cmd/migrate -preflight folder-sibling-uniqueness` reports duplicate sibling folder names before migration `000009`
   - migration `000009` now fails with a clear preflight message if duplicates still exist
+- Added page listing endpoint:
+  - `GET /api/v1/workspaces/{workspaceID}/pages`
+- Added `PageService.ListPages`
+- Added `PageRepository.ListByWorkspaceIDAndFolderID`
+- Implemented page listing semantics:
+  - omitted or blank `folder_id` lists workspace-root pages only
+  - `folder_id={folderID}` lists direct pages in that folder only
+  - listing excludes soft-deleted pages
+  - listing is ordered by `updated_at DESC, id ASC`
+- Documented frontend bootstrap pattern:
+  - load folders and root pages in parallel
+  - load folder pages on demand with `folder_id`
+- Added explicit environment workflow support:
+  - `go run ./cmd/api -env-file ...`
+  - `go run ./cmd/migrate -env-file ...`
+  - `.env.local.example`
+  - `.env.test.example`
+  - `.env.production.example`
+  - `docs/environment-workflow.md`
+  - single-command wrappers in `scripts/` for dev runtime, QA/test runtime, DB-backed tests, and production compose
+- Updated PostgreSQL test DSN resolution:
+  - DB-backed tests now prefer `.env.test` before `.env`
+  - optional `TEST_ENV_FILE` override supported
+- Local Docker PostgreSQL now creates `noteapp_test` on a fresh volume via init script
+- Split Compose responsibilities:
+  - `docker-compose.yml` is production-only
+  - `docker-compose.local-db.yml` is for local dev/test PostgreSQL only
 - Updated frontend/backend documentation:
   - `frontend-repo/API_CONTRACT.md`
   - `frontend-repo/CONTEXT.md`
@@ -43,8 +71,13 @@ Verification from this session:
 - `go test ./cmd/migrate` passed
 - `go test ./internal/infrastructure/database -run TestFormatFolderSiblingUniquenessConflicts` passed
 - `go test ./internal/application ./internal/transport/http` passed
+- `go test ./internal/application` passed
+- `go test ./internal/transport/http` passed
 - `go test ./internal/repository/postgres -run TestDoesNotExist` passed (compile check only)
-- `go test ./internal/repository/postgres` could not run because local PostgreSQL was unavailable on `localhost:5432`
+- `go test ./cmd/api ./cmd/migrate ./internal/infrastructure/config ./internal/testutil/testenv` passed
+- `docker compose config` passed
+- `docker compose -f docker-compose.local-db.yml config` passed
+- `go test ./internal/repository/postgres` was not run because PostgreSQL-backed repository tests are destructive and should use an isolated test DSN
 
 Resume from here:
 - Do not repeat completed work through feature 23
@@ -89,6 +122,7 @@ Backend roadmap status:
 - `GET /api/v1/workspaces/{workspaceID}/folders`
 - `PATCH /api/v1/folders/{folderID}`
 - `POST /api/v1/workspaces/{workspaceID}/pages`
+- `GET /api/v1/workspaces/{workspaceID}/pages`
 - `GET /api/v1/pages/{pageID}`
 - `PATCH /api/v1/pages/{pageID}`
 - `DELETE /api/v1/pages/{pageID}`
@@ -107,10 +141,21 @@ Backend roadmap status:
 - `POST /api/v1/notifications/{notificationID}/read`
 
 ## Local Environment Notes
-- Docker Compose uses `postgres:15` for local compatibility on this machine
+- Production compose is `docker-compose.yml`
+- Local dev/test PostgreSQL compose is `docker-compose.local-db.yml`
 - Typical local commands:
-  - `docker compose up -d postgres`
-  - `go run ./cmd/migrate -preflight folder-sibling-uniqueness`
-  - `go run ./cmd/migrate -direction up`
+  - `docker compose -f docker-compose.local-db.yml up -d postgres`
+  - `go run ./cmd/migrate -env-file .env.local -direction up`
+  - `go run ./cmd/migrate -env-file .env.test -direction up`
+  - `go run ./cmd/migrate -env-file .env.production -preflight folder-sibling-uniqueness`
+  - `go run ./cmd/migrate -env-file .env.production -direction up`
   - `go test ./...`
-  - `go run ./cmd/api`
+  - `go run ./cmd/api -env-file .env.local` on `8082`
+  - `go run ./cmd/api -env-file .env.test` on `8081`
+  - `./scripts/dev-up.ps1` or `./scripts/dev-up.sh`
+  - `./scripts/qa-up.ps1` or `./scripts/qa-up.sh`
+  - `./scripts/test-db.ps1` or `./scripts/test-db.sh`
+  - `./scripts/test-all.ps1` or `./scripts/test-all.sh`
+  - `docker compose --env-file .env.production up -d --build`
+  - `./scripts/production-compose-up.ps1` or `./scripts/production-compose-up.sh`
+  - see `docs/environment-workflow.md`
