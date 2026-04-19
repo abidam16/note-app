@@ -16,16 +16,17 @@ import (
 )
 
 type Config struct {
-	AppEnv            string
-	HTTPPort          string
-	PostgresDSN       string
-	JWTIssuer         string
-	JWTSecret         string
-	AccessTokenTTL    time.Duration
-	RefreshTokenTTL   time.Duration
-	LocalStoragePath  string
-	TrustProxyHeaders bool
-	TrustedProxyCIDRs []string
+	AppEnv             string
+	HTTPPort           string
+	PostgresDSN        string
+	JWTIssuer          string
+	JWTSecret          string
+	AccessTokenTTL     time.Duration
+	RefreshTokenTTL    time.Duration
+	LocalStoragePath   string
+	CORSAllowedOrigins []string
+	TrustProxyHeaders  bool
+	TrustedProxyCIDRs  []string
 }
 
 func Load() (Config, error) {
@@ -42,13 +43,14 @@ func LoadFromEnvFile(path string) (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:            getEnv("APP_ENV", "development"),
-		HTTPPort:          getEnv("PORT", getEnv("HTTP_PORT", "8080")),
-		PostgresDSN:       getEnv("POSTGRES_DSN", getEnv("DATABASE_URL", "")),
-		JWTIssuer:         getEnv("JWT_ISSUER", "note-app"),
-		JWTSecret:         os.Getenv("JWT_SECRET"),
-		LocalStoragePath:  getEnv("LOCAL_STORAGE_PATH", "./tmp/storage"),
-		TrustedProxyCIDRs: splitCSVEnv("TRUSTED_PROXY_CIDRS"),
+		AppEnv:             getEnv("APP_ENV", "development"),
+		HTTPPort:           getEnv("PORT", getEnv("HTTP_PORT", "8080")),
+		PostgresDSN:        getEnv("POSTGRES_DSN", getEnv("DATABASE_URL", "")),
+		JWTIssuer:          getEnv("JWT_ISSUER", "note-app"),
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		LocalStoragePath:   getEnv("LOCAL_STORAGE_PATH", "./tmp/storage"),
+		CORSAllowedOrigins: splitCSVEnv("CORS_ALLOWED_ORIGINS"),
+		TrustedProxyCIDRs:  splitCSVEnv("TRUSTED_PROXY_CIDRS"),
 	}
 
 	var err error

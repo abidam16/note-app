@@ -113,7 +113,10 @@ func buildDefaultServer(cfg config.Config, logger *slog.Logger, db closable) app
 		WithSearchService(searchService).
 		WithNotificationService(notificationService).
 		WithNotificationStreamService(notificationStreamService).
-		WithClientIPConfig(transporthttpmiddlewareConfig(cfg))
+		WithClientIPConfig(transporthttpmiddlewareConfig(cfg)).
+		WithCORSConfig(transportmiddleware.CORSConfig{
+			AllowedOrigins: cfg.CORSAllowedOrigins,
+		})
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

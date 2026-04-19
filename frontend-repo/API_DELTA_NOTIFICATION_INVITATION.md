@@ -9,7 +9,12 @@ This doc covers only backend additions and changed behavior relevant to the fron
   - Request: `{ "email": string, "role": "owner|editor|viewer" }`
   - Response used by UI: `id`, `workspace_id`, `email`, `role`, `status`, `version`, `invited_by`, `created_at`, `updated_at`, `accepted_at`
   - UI notes: creates a pending invitation immediately; `status` always starts as `pending`, `version` starts at `1`, and `updated_at` matches `created_at`.
-  - Errors / edge cases: invalid email or role returns `422`; duplicate pending invite or inviting an existing member returns `409`.
+  - Errors / edge cases:
+    - invalid email or role returns `422 validation_failed`
+    - inviting the actor's own email returns `409 invitation_self_email`
+    - inviting an unregistered email returns `409 invitation_target_unregistered`
+    - inviting an existing workspace member returns `409 invitation_existing_member`
+    - duplicate pending invite returns `409 invitation_duplicate_pending`
 
 - `GET /api/v1/workspaces/{workspaceID}/invitations`
   - Auth: `owner`
@@ -23,6 +28,14 @@ This doc covers only backend additions and changed behavior relevant to the fron
   - Query: `status?=pending|accepted|rejected|cancelled|all`, `limit?`, `cursor?`
   - Response used by UI: `items[]` with invitation fields, plus `next_cursor`, `has_more`
   - UI notes: this is the signed-in user's cross-workspace invitation inbox; filtering and pagination match the workspace list.
+  - UI notes: for signed-in users with zero workspace memberships, `GET /api/v1/my/invitations?status=pending` is the authoritative invitation-review source before empty-workspace onboarding.
+  - UI notes: canonical entry sequence for a no-workspace user:
+    1. call `GET /api/v1/workspaces`
+    2. if the workspace list is empty, call `GET /api/v1/my/invitations?status=pending`
+    3. if pending invitations exist, route to invitation review first
+    4. if no pending invitations exist, continue to empty-workspace onboarding
+  - UI notes: invitation rows from this endpoint, not notification payloads or SSE events, should drive accept/reject actions from the no-workspace entry path.
+  - UI notes: after accepting or rejecting from this entry path, refresh `GET /api/v1/workspaces` and `GET /api/v1/my/invitations?status=pending` before deciding the next route.
   - Errors / edge cases: invalid `status`, `limit`, or `cursor` returns `422`; actor lookup failure returns `401`.
 
 - `PATCH /api/v1/workspace-invitations/{invitationID}`
@@ -132,6 +145,8 @@ This doc covers only backend additions and changed behavior relevant to the fron
 
 ## Frontend-impacting behavior changes
 
+- No-workspace signed-in entry now has a canonical two-endpoint contract: check `GET /api/v1/workspaces` first, then `GET /api/v1/my/invitations?status=pending` before empty-workspace onboarding.
+- Notification inbox rows and SSE remain convenience/freshness surfaces; they are not the canonical routing authority for invitation-first no-workspace entry.
 - Invitation responses now carry live state fields such as `status`, `version`, `accepted_at`, `responded_at`, and `cancelled_at`; the UI should stop assuming invitation state is implicit.
 - Notification inbox data is now the canonical source for read state, while unread badges should come from the unread-count endpoint or SSE, not from local inbox math.
 - SSE is now part of the notification UX, so inbox and badge refresh should react to stream events instead of polling only.

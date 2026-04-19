@@ -200,18 +200,31 @@ func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, inpu
 		return domain.WorkspaceInvitation{}, fmt.Errorf("%w: invalid email", domain.ErrValidation)
 	}
 
+	actor, err := s.users.GetByID(ctx, actorID)
+	switch {
+	case err == nil:
+		if strings.EqualFold(actor.Email, email) {
+			return domain.WorkspaceInvitation{}, domain.ErrInvitationSelfEmail
+		}
+	case errors.Is(err, domain.ErrNotFound):
+		return domain.WorkspaceInvitation{}, domain.ErrUnauthorized
+	case err != nil:
+		return domain.WorkspaceInvitation{}, err
+	}
+
 	user, err := s.users.GetByEmail(ctx, email)
 	switch {
 	case err == nil:
 		_, membershipErr := s.workspaces.GetMembershipByUserID(ctx, input.WorkspaceID, user.ID)
 		switch {
 		case membershipErr == nil:
-			return domain.WorkspaceInvitation{}, domain.ErrConflict
+			return domain.WorkspaceInvitation{}, domain.ErrInvitationExistingMember
 		case errors.Is(membershipErr, domain.ErrForbidden):
 		default:
 			return domain.WorkspaceInvitation{}, membershipErr
 		}
 	case errors.Is(err, domain.ErrNotFound):
+		return domain.WorkspaceInvitation{}, domain.ErrInvitationUnregistered
 	case err != nil:
 		return domain.WorkspaceInvitation{}, err
 	}
@@ -219,7 +232,7 @@ func (s WorkspaceService) InviteMember(ctx context.Context, actorID string, inpu
 	_, err = s.workspaces.GetActiveInvitationByEmail(ctx, input.WorkspaceID, email)
 	switch {
 	case err == nil:
-		return domain.WorkspaceInvitation{}, domain.ErrConflict
+		return domain.WorkspaceInvitation{}, domain.ErrInvitationDuplicatePending
 	case !errors.Is(err, domain.ErrNotFound):
 		return domain.WorkspaceInvitation{}, err
 	}

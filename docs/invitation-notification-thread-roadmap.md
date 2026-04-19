@@ -7,11 +7,19 @@ The goal is to make the collaboration inbox reliable, clear, and safe under conc
 
 This roadmap does not extend legacy flat `page_comments`. New product work should build on thread endpoints and thread messages. Legacy flat comments remain supported only for backward compatibility.
 
+Original roadmap scope for Tasks 1 through 28 is complete and tracked in `docs/checkpoint.md`. This roadmap now also carries the next follow-on slice required by the 2026-04-18 PRD update for invitation eligibility and no-workspace invitation-first entry behavior.
+
 ## Diagnosis
-The current backend has three gaps:
+The original initiative started from three core gaps:
 - invitation state is too small for update, reject, and cancel flows
 - notifications are too small for actor, title, content, action state, and future types
 - comment and thread notifications are produced synchronously in request paths, which is fragile under retries, spikes, and races
+
+The current backend now also has invitation-policy drift against the updated PRD:
+- invite create still allows unregistered target emails
+- self-invite is not enforced as a distinct invalid create case
+- invalid create cases are not all distinguishable to clients
+- no-workspace post-auth entry still depends on the client coordinating workspace and invitation calls explicitly
 
 The core design problem is not only API shape. It is consistency. Invitation rows, thread messages, notification rows, and unread counts must stay aligned even when multiple actors act at the same time.
 
@@ -36,6 +44,8 @@ The core design problem is not only API shape. It is consistency. Invitation row
 
 ## Locked Product Decisions
 - Invitation target email is immutable after create.
+- Invitation creation is allowed only for already registered accounts.
+- Workspace owners may not invite their own account email.
 - A pending invitation may update its role in place.
 - If the inviter wants a different target user, they must cancel and create a new invitation.
 - Invitation status is:
@@ -47,6 +57,8 @@ The core design problem is not only API shape. It is consistency. Invitation row
   - one live notification per invitation
   - the same notification row is updated as invitation state changes
   - only `pending` invitation notifications are actionable
+- Invite-create invalid cases for unregistered email, self-invite, existing member, and duplicate pending invite must remain distinguishable to clients.
+- If an authenticated user has no workspace memberships but does have pending invitations, invitation review takes precedence over empty-workspace onboarding.
 - Comment notification recipients are the relevant users only:
   - thread creator
   - prior repliers
@@ -62,7 +74,7 @@ The core design problem is not only API shape. It is consistency. Invitation row
 - `blocked`
 
 ## Current Task
-- `not_started` Task 1: invitation state schema
+- `not_started` Task 29: invitation eligibility and no-workspace entry alignment
 
 ## Phases
 - Phase 1: MVP foundation and invitation lifecycle
@@ -70,8 +82,11 @@ The core design problem is not only API shape. It is consistency. Invitation row
 - Phase 3: relevant-user comment notifications
 - Phase 4: mention support
 - Phase 5: advanced control, real-time delivery, and recovery
+- Phase 6: invitation eligibility and no-workspace entry alignment
 
 ## Tasks
+
+Tasks 1 through 28 are preserved as the historical delivery record for the original roadmap scope. Their authoritative completion state lives in `docs/checkpoint.md`, not in the inline status labels below.
 
 ### Phase 1: MVP Foundation And Invitation Lifecycle
 
@@ -632,6 +647,8 @@ The core design problem is not only API shape. It is consistency. Invitation row
    - Negative codes: none
 
 ## Execution Order
+The execution order below is the historical order for Tasks 1 through 28. The new follow-on planning path starts with Task 29 in Phase 6.
+
 - Start with invitation schema and invitation endpoints.
 - Build outbox and invitation projector before broad inbox work.
 - Move thread notifications to outbox before adding mentions.
@@ -649,3 +666,94 @@ The core design problem is not only API shape. It is consistency. Invitation row
 - Mention notifications are separate, direct, and idempotent.
 - Notification production no longer depends on synchronous request-path fanout.
 - Unread count remains correct under retries and concurrent reads.
+- Invite-create policy matches the PRD target for registered-account-only eligibility and self-invite rejection.
+- Frontend-facing contract docs make current implementation drift explicit until backend behavior is aligned.
+- Authenticated users with no workspace memberships have a canonical invitation-review-first path before empty-workspace onboarding.
+
+## Follow-On Phase 6: Invitation Eligibility And No-Workspace Entry Alignment
+
+- Objective:
+  Align invitation create behavior and the frontend-facing contract with the updated PRD without reopening the completed invitation lifecycle and notification architecture work.
+- Why this phase exists now:
+  The original roadmap delivered the lifecycle, notification, and concurrency model, but the updated PRD now requires stricter invite eligibility plus a clearer no-workspace entry rule than the current backend exposes cleanly.
+- Key outcomes:
+  - invite create no longer accepts unregistered target emails
+  - self-invite is rejected explicitly
+  - invalid invite-create cases remain distinguishable to clients
+  - the frontend has a canonical contract path for invitation review before empty-workspace onboarding
+- In scope:
+  - invitation create eligibility and error-outcome alignment
+  - frontend-facing API contract updates for current drift and target behavior
+  - no-workspace invitation-review entry contract clarification using invitation source data
+- Out of scope:
+  - outbound email invitation delivery
+  - ownership-transfer product changes
+  - replacing invitation source data with notification-derived authority
+- Dependencies:
+  - Tasks 1 through 28 are already complete
+  - PRD invitation policy update dated 2026-04-18
+- Risks:
+  - registered-account-only invite validation can reintroduce account-existence leakage if the error model is designed carelessly
+  - the no-workspace entry rule can drift again if bootstrap and invitation surfaces remain loosely coordinated
+- Exit criteria:
+  - create-invitation behavior and docs align with the PRD target
+  - contract docs explicitly separate current backend behavior from target behavior until code lands
+  - the next implementation work can be split into bounded single-task plans
+
+### Follow-On Planning Candidates
+
+29. `not_started` Invite-create eligibility and error-outcome alignment
+   - Goal: align `POST /api/v1/workspaces/{workspaceID}/invitations` with registered-account-only targeting and explicit invalid-case outcomes.
+   - Why now: this endpoint is the main remaining product drift after the original invitation lifecycle work.
+   - In scope:
+     - reject unregistered target email
+     - reject actor self-email
+     - preserve existing member and duplicate pending rejection rules
+     - expose client-distinguishable outcomes for unregistered, self, existing-member, and duplicate-pending failures
+   - Out of scope:
+     - invitation delivery by email
+     - invitation role policy changes beyond the existing role set
+   - Dependencies:
+     - completed invitation lifecycle tasks
+     - updated frontend-facing API docs
+   - Risks:
+     - careless error design could leak registration state more broadly than intended
+   - Exit criteria:
+     - docs, tests, and endpoint behavior agree on the allowed invite targets and invalid cases
+
+30. `not_started` No-workspace invitation-first entry contract
+   - Goal: give clients a canonical way to route authenticated users with zero memberships into pending invitation review before empty-workspace onboarding.
+   - Why now: the product rule is now explicit, but current client behavior still has to infer it from multiple surfaces.
+   - In scope:
+     - define the canonical invitation-review source for no-workspace users
+     - document whether the existing `GET /api/v1/my/invitations` plus workspace bootstrap is sufficient or whether a dedicated bootstrap contract is needed
+     - preserve invitation source data as the authority for accept/reject state
+   - Out of scope:
+     - redesigning the inbox model
+     - general onboarding redesign unrelated to invitations
+   - Dependencies:
+     - invitation source data and `GET /api/v1/my/invitations` remain available
+   - Risks:
+     - ambiguous ownership between auth bootstrap and invitation surfaces can create repeated frontend drift
+   - Exit criteria:
+     - frontend contract documents a stable invitation-review-first flow for users with no memberships
+
+## Decision
+- `INITIATIVE_ROADMAP_UPDATE`
+
+## Why This Decision
+- The initiative already exists and the original invitation-notification scope remains the right execution container.
+- The new work is a follow-on product-alignment slice, not a separate initiative.
+- The next need is sequencing and planning for bounded implementation, not another PRD or ADR.
+
+## What Planning Should Do Next
+- Create a single-task plan for follow-on candidate 29 first.
+- Keep candidate 30 separate unless candidate 29 proves a bootstrap contract change is required.
+
+## What Is Explicitly Deferred Or Not Next
+- Outbound invitation delivery is not next.
+- Ownership-transfer policy is not next.
+- Reworking the completed notification architecture is not next.
+
+## Immediate Next Step
+- Proceed to create a single-task plan for Task 29: invite-create eligibility and error-outcome alignment.

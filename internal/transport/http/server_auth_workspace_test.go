@@ -571,29 +571,30 @@ func TestAuthAndWorkspaceEndpoints(t *testing.T) {
 		t.Fatalf("unmarshal workspace payload: %v", err)
 	}
 
+	assertInviteErrorCode := func(rec *httptest.ResponseRecorder, expectedStatus int, expectedCode string) {
+		t.Helper()
+		if rec.Code != expectedStatus {
+			t.Fatalf("expected status %d, got %d body=%s", expectedStatus, rec.Code, rec.Body.String())
+		}
+		var payload struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal error payload: %v", err)
+		}
+		if payload.Error.Code != expectedCode {
+			t.Fatalf("expected error code %q, got %q body=%s", expectedCode, payload.Error.Code, rec.Body.String())
+		}
+	}
+
 	inviteUnknownReq := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations", bytes.NewBufferString(`{"email":"unknown@example.com","role":"viewer"}`))
 	inviteUnknownReq.Header.Set("Authorization", "Bearer "+refreshPayload.Data.Tokens.AccessToken)
 	inviteUnknownReq.Header.Set("Content-Type", "application/json")
 	inviteUnknownRec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(inviteUnknownRec, inviteUnknownReq)
-	if inviteUnknownRec.Code != http.StatusCreated {
-		t.Fatalf("expected unknown invitee invitation 201, got %d body=%s", inviteUnknownRec.Code, inviteUnknownRec.Body.String())
-	}
-	var inviteUnknownPayload struct {
-		Data map[string]any `json:"data"`
-	}
-	if err := json.Unmarshal(inviteUnknownRec.Body.Bytes(), &inviteUnknownPayload); err != nil {
-		t.Fatalf("unmarshal unknown invite payload: %v", err)
-	}
-	if inviteUnknownPayload.Data["status"] != "pending" {
-		t.Fatalf("expected pending status in invite response, got %+v", inviteUnknownPayload.Data)
-	}
-	if inviteUnknownPayload.Data["version"] != float64(1) {
-		t.Fatalf("expected version 1 in invite response, got %+v", inviteUnknownPayload.Data)
-	}
-	if inviteUnknownPayload.Data["updated_at"] == nil {
-		t.Fatalf("expected updated_at in invite response, got %+v", inviteUnknownPayload.Data)
-	}
+	assertInviteErrorCode(inviteUnknownRec, http.StatusConflict, "invitation_target_unregistered")
 
 	ownerListReq := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
 	ownerListReq.Header.Set("Authorization", "Bearer "+refreshPayload.Data.Tokens.AccessToken)
@@ -670,6 +671,13 @@ func TestAuthAndWorkspaceEndpoints(t *testing.T) {
 		t.Fatalf("expected bad invite json 400, got %d", badInviteRec.Code)
 	}
 
+	selfInviteReq := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations", bytes.NewBufferString(`{"email":" OWNER@example.com ","role":"viewer"}`))
+	selfInviteReq.Header.Set("Authorization", "Bearer "+refreshPayload.Data.Tokens.AccessToken)
+	selfInviteReq.Header.Set("Content-Type", "application/json")
+	selfInviteRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(selfInviteRec, selfInviteReq)
+	assertInviteErrorCode(selfInviteRec, http.StatusConflict, "invitation_self_email")
+
 	inviteReq := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations", bytes.NewBufferString(`{"email":"member@example.com","role":"editor"}`))
 	inviteReq.Header.Set("Authorization", "Bearer "+refreshPayload.Data.Tokens.AccessToken)
 	inviteReq.Header.Set("Content-Type", "application/json")
@@ -687,6 +695,13 @@ func TestAuthAndWorkspaceEndpoints(t *testing.T) {
 	if invitePayloadMap.Data["status"] != "pending" || invitePayloadMap.Data["version"] != float64(1) {
 		t.Fatalf("expected public invitation state fields in response, got %+v", invitePayloadMap.Data)
 	}
+
+	duplicateInviteReq := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations", bytes.NewBufferString(`{"email":"member@example.com","role":"viewer"}`))
+	duplicateInviteReq.Header.Set("Authorization", "Bearer "+refreshPayload.Data.Tokens.AccessToken)
+	duplicateInviteReq.Header.Set("Content-Type", "application/json")
+	duplicateInviteRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(duplicateInviteRec, duplicateInviteReq)
+	assertInviteErrorCode(duplicateInviteRec, http.StatusConflict, "invitation_duplicate_pending")
 
 	viewerInviteReq := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations", bytes.NewBufferString(`{"email":"x@example.com","role":"viewer"}`))
 	viewerInviteReq.Header.Set("Authorization", "Bearer "+invitedLoginPayload.Data.Tokens.AccessToken)
@@ -739,9 +754,7 @@ func TestAuthAndWorkspaceEndpoints(t *testing.T) {
 	reinviteMemberReq.Header.Set("Content-Type", "application/json")
 	reinviteMemberRec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(reinviteMemberRec, reinviteMemberReq)
-	if reinviteMemberRec.Code != http.StatusConflict {
-		t.Fatalf("expected existing member invite conflict 409, got %d body=%s", reinviteMemberRec.Code, reinviteMemberRec.Body.String())
-	}
+	assertInviteErrorCode(reinviteMemberRec, http.StatusConflict, "invitation_existing_member")
 
 	listInvitationsReq := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations?status=all&limit=1", nil)
 	listInvitationsReq.Header.Set("Authorization", "Bearer "+refreshPayload.Data.Tokens.AccessToken)
@@ -756,25 +769,8 @@ func TestAuthAndWorkspaceEndpoints(t *testing.T) {
 	if err := json.Unmarshal(listInvitationsRec.Body.Bytes(), &invitationListPayload); err != nil {
 		t.Fatalf("unmarshal invitation list payload: %v", err)
 	}
-	if len(invitationListPayload.Data.Items) != 1 || !invitationListPayload.Data.HasMore || invitationListPayload.Data.NextCursor == nil {
+	if len(invitationListPayload.Data.Items) != 1 || invitationListPayload.Data.HasMore || invitationListPayload.Data.NextCursor != nil {
 		t.Fatalf("unexpected invitation list page: %+v", invitationListPayload.Data)
-	}
-
-	nextInvitationsReq := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations?status=all&limit=1&cursor="+*invitationListPayload.Data.NextCursor, nil)
-	nextInvitationsReq.Header.Set("Authorization", "Bearer "+refreshPayload.Data.Tokens.AccessToken)
-	nextInvitationsRec := httptest.NewRecorder()
-	server.Handler().ServeHTTP(nextInvitationsRec, nextInvitationsReq)
-	if nextInvitationsRec.Code != http.StatusOK {
-		t.Fatalf("expected invitation cursor page 200, got %d body=%s", nextInvitationsRec.Code, nextInvitationsRec.Body.String())
-	}
-	var nextInvitationListPayload struct {
-		Data domain.WorkspaceInvitationList `json:"data"`
-	}
-	if err := json.Unmarshal(nextInvitationsRec.Body.Bytes(), &nextInvitationListPayload); err != nil {
-		t.Fatalf("unmarshal next invitation list payload: %v", err)
-	}
-	if len(nextInvitationListPayload.Data.Items) != 1 || nextInvitationListPayload.Data.HasMore || nextInvitationListPayload.Data.NextCursor != nil {
-		t.Fatalf("unexpected final invitation list page: %+v", nextInvitationListPayload.Data)
 	}
 
 	myInvitationsReq := httptest.NewRequest(http.MethodGet, "/api/v1/my/invitations?status=all&limit=1", nil)
@@ -1094,7 +1090,7 @@ func TestAcceptInvitationReturnsNotFoundForMismatchedEmail(t *testing.T) {
 		registerReq.Header.Set("Content-Type", "application/json")
 		registerRec := httptest.NewRecorder()
 		server.Handler().ServeHTTP(registerRec, registerReq)
-		if registerRec.Code != http.StatusCreated {
+		if registerRec.Code != http.StatusCreated && registerRec.Code != http.StatusConflict {
 			t.Fatalf("register failed for %s: %d %s", email, registerRec.Code, registerRec.Body.String())
 		}
 
@@ -1117,6 +1113,7 @@ func TestAcceptInvitationReturnsNotFoundForMismatchedEmail(t *testing.T) {
 
 	ownerAuth := registerAndLogin("owner@example.com")
 	outsiderAuth := registerAndLogin("outsider@example.com")
+	_ = registerAndLogin("member@example.com")
 
 	createWorkspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBufferString(`{"name":"Engineering"}`))
 	createWorkspaceReq.Header.Set("Authorization", "Bearer "+ownerAuth.Tokens.AccessToken)
@@ -1176,7 +1173,7 @@ func TestAcceptInvitationEndpointRequiresVersion(t *testing.T) {
 		registerReq.Header.Set("Content-Type", "application/json")
 		registerRec := httptest.NewRecorder()
 		server.Handler().ServeHTTP(registerRec, registerReq)
-		if registerRec.Code != http.StatusCreated {
+		if registerRec.Code != http.StatusCreated && registerRec.Code != http.StatusConflict {
 			t.Fatalf("register failed for %s: %d %s", email, registerRec.Code, registerRec.Body.String())
 		}
 		loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"email":"`+email+`","password":"Password1"}`))
@@ -1274,7 +1271,7 @@ func TestRejectInvitationEndpointRequiresVersion(t *testing.T) {
 		registerReq.Header.Set("Content-Type", "application/json")
 		registerRec := httptest.NewRecorder()
 		server.Handler().ServeHTTP(registerRec, registerReq)
-		if registerRec.Code != http.StatusCreated {
+		if registerRec.Code != http.StatusCreated && registerRec.Code != http.StatusConflict {
 			t.Fatalf("register failed for %s: %d %s", email, registerRec.Code, registerRec.Body.String())
 		}
 		loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"email":"`+email+`","password":"Password1"}`))
@@ -1406,7 +1403,7 @@ func TestCancelInvitationEndpointRequiresVersion(t *testing.T) {
 		registerReq.Header.Set("Content-Type", "application/json")
 		registerRec := httptest.NewRecorder()
 		server.Handler().ServeHTTP(registerRec, registerReq)
-		if registerRec.Code != http.StatusCreated {
+		if registerRec.Code != http.StatusCreated && registerRec.Code != http.StatusConflict {
 			t.Fatalf("register failed for %s: %d %s", email, registerRec.Code, registerRec.Body.String())
 		}
 		loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"email":"`+email+`","password":"Password1"}`))
@@ -1470,6 +1467,7 @@ func TestCancelInvitationEndpointRequiresVersion(t *testing.T) {
 	joinAsOwner(secondOwnerAuth.User.ID)
 
 	createInvitation := func(email string) domain.WorkspaceInvitation {
+		_ = registerAndLogin(email)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations", bytes.NewBufferString(`{"email":"`+email+`","role":"viewer"}`))
 		req.Header.Set("Authorization", "Bearer "+ownerAuth.Tokens.AccessToken)
 		req.Header.Set("Content-Type", "application/json")
@@ -1581,7 +1579,7 @@ func TestPatchWorkspaceInvitationEndpoint(t *testing.T) {
 		registerReq.Header.Set("Content-Type", "application/json")
 		registerRec := httptest.NewRecorder()
 		server.Handler().ServeHTTP(registerRec, registerReq)
-		if registerRec.Code != http.StatusCreated {
+		if registerRec.Code != http.StatusCreated && registerRec.Code != http.StatusConflict {
 			t.Fatalf("register failed for %s: %d %s", email, registerRec.Code, registerRec.Body.String())
 		}
 
@@ -1623,6 +1621,7 @@ func TestPatchWorkspaceInvitationEndpoint(t *testing.T) {
 	}
 
 	createInvitation := func(email string, role string) domain.WorkspaceInvitation {
+		_ = registerAndLogin(email)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/"+workspacePayload.Data.Workspace.ID+"/invitations", bytes.NewBufferString(`{"email":"`+email+`","role":"`+role+`"}`))
 		req.Header.Set("Authorization", "Bearer "+ownerAuth.Tokens.AccessToken)
 		req.Header.Set("Content-Type", "application/json")

@@ -309,33 +309,43 @@ func TestWorkspaceServiceAdditionalBranches(t *testing.T) {
 			getMembershipByUserIDFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
 				return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
 			},
-		}, authUserRepoStub{})
-		invitation, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "missing@example.com", Role: domain.RoleViewer})
-		if err != nil {
-			t.Fatalf("expected unregistered invitee to still get invitation, got %v", err)
-		}
-		if invitation.Email != "missing@example.com" {
-			t.Fatalf("expected normalized invitation email, got %+v", invitation)
-		}
-		if invitation.Status != domain.WorkspaceInvitationStatusPending {
-			t.Fatalf("expected pending invitation status, got %+v", invitation)
-		}
-		if invitation.Version != 1 {
-			t.Fatalf("expected invitation version 1, got %+v", invitation)
-		}
-		if !invitation.UpdatedAt.Equal(invitation.CreatedAt) {
-			t.Fatalf("expected invitation updated_at to equal created_at, got %+v", invitation)
+		}, authUserRepoStub{getByIDFn: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: "user-1", Email: "owner@example.com"}, nil
+		}})
+		if _, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "missing@example.com", Role: domain.RoleViewer}); !errors.Is(err, domain.ErrInvitationUnregistered) {
+			t.Fatalf("expected unregistered invitee conflict, got %v", err)
 		}
 
 		svc = NewWorkspaceService(workspaceRepoStub{
 			getMembershipByUserIDFn: func(context.Context, string, string) (domain.WorkspaceMember, error) {
 				return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
 			},
+		}, authUserRepoStub{getByIDFn: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: "user-1", Email: "owner@example.com"}, nil
+		}})
+		if _, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: " OWNER@example.com ", Role: domain.RoleViewer}); !errors.Is(err, domain.ErrInvitationSelfEmail) {
+			t.Fatalf("expected self invite conflict, got %v", err)
+		}
+
+		svc = NewWorkspaceService(workspaceRepoStub{
+			getMembershipByUserIDFn: func(_ context.Context, workspaceID, userID string) (domain.WorkspaceMember, error) {
+				if workspaceID == "w1" && userID == "user-1" {
+					return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+				}
+				return domain.WorkspaceMember{}, domain.ErrForbidden
+			},
 			getActiveInvitationByEmailFn: func(context.Context, string, string) (domain.WorkspaceInvitation, error) {
 				return domain.WorkspaceInvitation{ID: "inv-1"}, nil
 			},
-		}, users)
-		if _, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "a@b.com", Role: domain.RoleViewer}); !errors.Is(err, domain.ErrConflict) {
+		}, authUserRepoStub{
+			getByIDFn: func(context.Context, string) (domain.User, error) {
+				return domain.User{ID: "user-1", Email: "owner@example.com"}, nil
+			},
+			getByEmailFn: func(context.Context, string) (domain.User, error) {
+				return domain.User{ID: "registered-1", Email: "a@b.com"}, nil
+			},
+		})
+		if _, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "a@b.com", Role: domain.RoleViewer}); !errors.Is(err, domain.ErrInvitationDuplicatePending) {
 			t.Fatalf("expected conflict for duplicate invitation, got %v", err)
 		}
 
@@ -355,9 +365,49 @@ func TestWorkspaceServiceAdditionalBranches(t *testing.T) {
 				t.Fatalf("unexpected email lookup %q", email)
 			}
 			return domain.User{ID: "member-1", Email: email}, nil
+		}, getByIDFn: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: "user-1", Email: "owner@example.com"}, nil
 		}})
-		if _, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "member@example.com", Role: domain.RoleViewer}); !errors.Is(err, domain.ErrConflict) {
+		if _, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "member@example.com", Role: domain.RoleViewer}); !errors.Is(err, domain.ErrInvitationExistingMember) {
 			t.Fatalf("expected conflict for existing workspace member, got %v", err)
+		}
+
+		svc = NewWorkspaceService(workspaceRepoStub{
+			getMembershipByUserIDFn: func(_ context.Context, workspaceID, userID string) (domain.WorkspaceMember, error) {
+				if workspaceID == "w1" && userID == "user-1" {
+					return domain.WorkspaceMember{Role: domain.RoleOwner}, nil
+				}
+				return domain.WorkspaceMember{}, domain.ErrForbidden
+			},
+			createInvitationFn: func(_ context.Context, invitation domain.WorkspaceInvitation) (domain.WorkspaceInvitation, error) {
+				return invitation, nil
+			},
+		}, authUserRepoStub{
+			getByIDFn: func(context.Context, string) (domain.User, error) {
+				return domain.User{ID: "user-1", Email: "owner@example.com"}, nil
+			},
+			getByEmailFn: func(_ context.Context, email string) (domain.User, error) {
+				if email != "registered@example.com" {
+					t.Fatalf("unexpected registered invite lookup %q", email)
+				}
+				return domain.User{ID: "registered-1", Email: email}, nil
+			},
+		})
+		invitation, err := svc.InviteMember(context.Background(), "user-1", InviteMemberInput{WorkspaceID: "w1", Email: "Registered@example.com", Role: domain.RoleViewer})
+		if err != nil {
+			t.Fatalf("expected registered invitee success, got %v", err)
+		}
+		if invitation.Email != "registered@example.com" {
+			t.Fatalf("expected normalized invitation email, got %+v", invitation)
+		}
+		if invitation.Status != domain.WorkspaceInvitationStatusPending {
+			t.Fatalf("expected pending invitation status, got %+v", invitation)
+		}
+		if invitation.Version != 1 {
+			t.Fatalf("expected invitation version 1, got %+v", invitation)
+		}
+		if !invitation.UpdatedAt.Equal(invitation.CreatedAt) {
+			t.Fatalf("expected invitation updated_at to equal created_at, got %+v", invitation)
 		}
 	})
 

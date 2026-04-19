@@ -35,6 +35,7 @@ type Server struct {
 	tokenManager   appauth.TokenManager
 	storage        storage.FileStorage
 	clientIPConfig appmiddleware.ClientIPConfig
+	corsConfig     appmiddleware.CORSConfig
 }
 
 const heavyRouteMaxConcurrent = 4
@@ -89,6 +90,11 @@ func (s Server) WithClientIPConfig(clientIPConfig appmiddleware.ClientIPConfig) 
 	return s
 }
 
+func (s Server) WithCORSConfig(corsConfig appmiddleware.CORSConfig) Server {
+	s.corsConfig = corsConfig
+	return s
+}
+
 func (s Server) Handler() nethttp.Handler {
 	router := chi.NewRouter()
 	router.Use(chimiddleware.RequestID)
@@ -112,6 +118,7 @@ func (s Server) Handler() nethttp.Handler {
 			r.Get("/notifications/stream", s.handleNotificationsStream())
 		})
 		r.Route("/auth", func(r chi.Router) {
+			r.Use(appmiddleware.CORS(s.corsConfig))
 			r.Use(chimiddleware.Timeout(30 * time.Second))
 			r.Use(appmiddleware.NoStore())
 			r.With(appmiddleware.RateLimit(appmiddleware.RateLimitConfig{
@@ -210,6 +217,14 @@ func mapError(err error) (int, APIError) {
 		return nethttp.StatusForbidden, NewAPIError("forbidden", err.Error())
 	case errors.Is(err, domain.ErrNotFound):
 		return nethttp.StatusNotFound, NewAPIError("not_found", err.Error())
+	case errors.Is(err, domain.ErrInvitationSelfEmail):
+		return nethttp.StatusConflict, NewAPIError("invitation_self_email", err.Error())
+	case errors.Is(err, domain.ErrInvitationUnregistered):
+		return nethttp.StatusConflict, NewAPIError("invitation_target_unregistered", err.Error())
+	case errors.Is(err, domain.ErrInvitationExistingMember):
+		return nethttp.StatusConflict, NewAPIError("invitation_existing_member", err.Error())
+	case errors.Is(err, domain.ErrInvitationDuplicatePending):
+		return nethttp.StatusConflict, NewAPIError("invitation_duplicate_pending", err.Error())
 	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrEmailAlreadyUsed), errors.Is(err, domain.ErrLastOwnerRemoval), errors.Is(err, domain.ErrInvitationEmailMismatch):
 		return nethttp.StatusConflict, NewAPIError("conflict", err.Error())
 	default:

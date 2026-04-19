@@ -102,6 +102,12 @@ go run ./cmd/migrate -env-file .env.local -direction up
 go run ./cmd/api -env-file .env.local
 ```
 
+For frontend browser integration against the local API, set:
+
+- `CORS_ALLOWED_ORIGINS=http://localhost:5173`
+
+Use a comma-separated list if you need to allow more than one local frontend origin.
+
 Equivalent `make` targets:
 
 ```bash
@@ -136,6 +142,8 @@ Create `.env.test` from `.env.test.example`, then run:
 go run ./cmd/migrate -env-file .env.test -direction up
 go run ./cmd/api -env-file .env.test
 ```
+
+If you are manually testing the QA/test API from the frontend dev server, keep `CORS_ALLOWED_ORIGINS=http://localhost:5173` in `.env.test`.
 
 Equivalent `make` targets:
 
@@ -220,6 +228,8 @@ go run ./cmd/migrate -env-file .env.production -preflight folder-sibling-uniquen
 go run ./cmd/migrate -env-file .env.production -direction up
 docker compose --env-file .env.production up -d --build
 ```
+
+Set `CORS_ALLOWED_ORIGINS` to the exact browser frontend origins that should be allowed to call the API. Do not use `*` for this auth flow.
 
 Equivalent `make` targets:
 

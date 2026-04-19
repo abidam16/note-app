@@ -4,6 +4,9 @@
 This section supersedes older references below if they differ.
 
 Current completed feature:
+- Invitation roadmap Task 30 complete: the frontend-facing contract now defines a canonical no-workspace invitation-first entry flow using existing backend surfaces only; clients must check `GET /api/v1/workspaces` first, then `GET /api/v1/my/invitations?status=pending` before empty-workspace onboarding, while `GET /api/v1/auth/me` remains identity-only and notifications/SSE remain convenience surfaces rather than the routing authority
+- Invitation roadmap Task 29 complete: invite-create now allows only registered accounts, rejects self-invite explicitly, preserves existing-member and duplicate-pending rejection, exposes distinct `409` API error codes for all four invalid create outcomes, and aligns invite-create service tests, HTTP tests, frontend contract docs, and checkpoint state with runtime behavior
+- ADR set added under `docs/adr/` to lock notification projection boundaries, thread-primary collaboration guidance, draft versus revision state separation, and invitation concurrency rules for future planning and review; titles and context wording were then tightened for reuse clarity; no runtime behavior changed
 - Invitation roadmap Task 28 complete: concurrency and load verification added with PostgreSQL race tests for invitation update/cancel conflicts, application projector replay and retry/idempotency coverage, DB-backed notification replay idempotency coverage, focused HTTP stale-version conflict regression, and load benchmarks plus verification docs
 - Invitation roadmap Task 27 complete: `go run ./cmd/notification-reconcile` now performs internal notification reconciliation with `-dry-run`, optional `-workspace-id` scope, bounded batch size, one-run advisory locking, cutoff-based source scanning, managed invitation/comment/mention repair, exact unread-counter rebuilds, best-effort post-repair invalidation publishing that never fails the run on publish errors, and now-registered-invitee backfill for missed live invitation notifications
 - Invitation roadmap Task 26 complete: `GET /api/v1/notifications/stream` now streams SSE `snapshot`, `unread_count`, and `inbox_invalidated` events for authenticated users, uses PostgreSQL `LISTEN/NOTIFY` for best-effort cross-instance invalidation, keeps REST inbox/unread-count endpoints as the source of truth, bypasses the normal 30s request timeout for the stream route, and sets HTTP server `WriteTimeout` to `0` so long-lived SSE connections are not killed
@@ -73,6 +76,56 @@ Current next strict roadmap feature:
   - cybersecurity roadmap scope complete for current code-level tasks
 
 What was completed in this session:
+- Completed invitation roadmap Task 30:
+  - documented the canonical no-workspace invitation-first entry contract using existing backend surfaces only
+  - clarified:
+    - `GET /api/v1/auth/me` remains identity-only and is not enough to decide invitation-first routing
+    - `GET /api/v1/workspaces` is the authoritative membership-presence check
+    - empty `GET /api/v1/workspaces` does not imply there are no pending invitations
+    - `GET /api/v1/my/invitations?status=pending` is the authoritative invitation-review source for users with zero memberships
+    - notification inbox rows and SSE events are convenience/freshness surfaces, not the routing authority for no-workspace entry
+  - documented the canonical client sequence:
+    - call `GET /api/v1/workspaces`
+    - if empty, call `GET /api/v1/my/invitations?status=pending`
+    - route to invitation review when pending invitations exist
+    - route to empty-workspace onboarding only when both surfaces are empty
+  - documented post-action refresh from the no-workspace entry path:
+    - `GET /api/v1/workspaces`
+    - `GET /api/v1/my/invitations?status=pending`
+  - updated:
+    - `frontend-repo/API_CONTRACT.md`
+    - `frontend-repo/API_DELTA_NOTIFICATION_INVITATION.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - documentation consistency pass against `PRD.md`
+    - documentation consistency pass against `ARCHITECTURE.md`
+    - documentation consistency pass against `internal/transport/http/server.go`
+- Completed invitation roadmap Task 29:
+  - `POST /api/v1/workspaces/{workspaceID}/invitations` now:
+    - rejects self-invite with `409 invitation_self_email`
+    - rejects unregistered target emails with `409 invitation_target_unregistered`
+    - rejects existing members with `409 invitation_existing_member`
+    - rejects duplicate pending invitations with `409 invitation_duplicate_pending`
+    - still returns pending invitation state on success with `version = 1` and `updated_at = created_at`
+  - application validation order now matches the PRD:
+    - normalize email
+    - reject self email
+    - require registered target
+    - reject existing member
+    - reject duplicate pending invite
+  - updated:
+    - `internal/domain/errors.go`
+    - `internal/application/workspace_service.go`
+    - `internal/application/workspace_service_additional_test.go`
+    - `internal/application/service_branch_extra_test.go`
+    - `internal/transport/http/server.go`
+    - `internal/transport/http/server_auth_workspace_test.go`
+    - `frontend-repo/API_CONTRACT.md`
+    - `frontend-repo/API_DELTA_NOTIFICATION_INVITATION.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "TestWorkspaceService|TestNotificationEvents" -count=1`
+    - `go test ./internal/transport/http -run "Test.*Invite|TestAcceptInvitation" -count=1`
 - Completed invitation roadmap Task 26:
   - added `GET /api/v1/notifications/stream` as an authenticated SSE endpoint
   - stream emits `snapshot`, `unread_count`, and `inbox_invalidated` events
@@ -1171,10 +1224,10 @@ Local runtime state after verification:
 
 ## Current State
 Completed roadmap features:
-- Invitation roadmap Task 25 complete; tasks 1 through 25 are implemented
+- Invitation roadmap Task 29 complete for the invite-create eligibility and error-outcome alignment slice
 
 Backend status:
-- Invitation, notification inbox, unread counter, transactional thread outbox, mention schema, create-thread mention write support, reply mention support, mention notification projection, and per-thread notification preference read/write are implemented through Task 25
+- Invitation, notification inbox, unread counter, transactional thread outbox, mention schema, create-thread mention write support, reply mention support, mention notification projection, per-thread notification preference read/write, SSE notification stream, notification reconciliation, concurrency/load verification, and invite-create eligibility/error-outcome alignment are implemented through Task 29
 - Available thread endpoints:
   - `POST /api/v1/pages/{pageID}/threads`
   - `GET /api/v1/pages/{pageID}/threads`
@@ -1182,14 +1235,12 @@ Backend status:
   - `POST /api/v1/threads/{threadID}/replies`
   - `POST /api/v1/threads/{threadID}/resolve`
   - `POST /api/v1/threads/{threadID}/reopen`
-- Next roadmap task is Task 26 notification stream endpoint
+- No next task is recorded in this checkpoint section yet; select the next approved roadmap or plan artifact before implementation.
 
 ## Exact Next Step
-- Implement:
-  - Task 26 notification stream endpoint
-Keep the roadmap and checkpoint aligned after each backend hardening slice.
+- Read the current roadmap and approved plan set, then select the next not-yet-implemented bounded task before coding.
 
 ## Resume Prompt
 If resuming in a new session, use this instruction:
 
-"Read `context.md`, `AGENTS.md`, `docs/checkpoint.md`, and `docs/invitation-notification-thread-execution-checklist.md` first. Continue from the invitation-notification roadmap state without repeating completed work. Treat Tasks 1 through 25 as implemented, Task 26 as next, and keep thread notification delivery scoped to relevant users unless I explicitly change scope."
+"Read `context.md`, `AGENTS.md`, `docs/checkpoint.md`, and the current roadmap/plan docs first. Continue from the latest completed invitation roadmap state without repeating completed work. Treat Task 29 invite-create eligibility and error-outcome alignment as implemented, and choose the next approved bounded task before coding."

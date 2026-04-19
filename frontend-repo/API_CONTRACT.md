@@ -426,6 +426,9 @@ Exception:
 ### GET `/api/v1/auth/me`
 - Auth: yes
 - Response `200`: `User`
+- Frontend usage:
+    - Use this for authenticated identity only.
+    - Do not treat this response as sufficient to decide no-workspace invitation-first routing.
 
 ## 3.3 Workspaces and Members
 
@@ -437,6 +440,10 @@ Exception:
     - Must not include workspaces from other users.
 - Frontend usage:
     - Call this after login/refresh to load persisted workspace context.
+    - This is the authoritative membership-presence check for signed-in entry.
+    - If the response is non-empty, continue the normal workspace-aware app entry flow.
+    - If the response is empty, do not send the user straight to empty-workspace onboarding yet; follow with `GET /api/v1/my/invitations?status=pending`.
+    - An empty workspace list means only that the actor has no current memberships. It does not imply there are no pending invitations.
 
 ### POST `/api/v1/workspaces`
 - Auth: yes
@@ -497,13 +504,18 @@ Exception:
     - `email` must be valid format
     - `role` must be one of `owner|editor|viewer`
     - invitee email is normalized before duplicate checks and persistence
-    - unregistered email is allowed
-    - duplicate pending invitation returns `409 conflict`
-    - existing workspace member email returns `409 conflict`
+    - target email must already belong to a registered account
+    - actor cannot invite their own account email
     - successful create always returns:
       - `status = pending`
       - `version = 1`
       - `updated_at = created_at`
+- Error codes:
+    - `409 invitation_self_email` when the normalized target email matches the authenticated actor email
+    - `409 invitation_target_unregistered` when no registered account exists for the normalized target email
+    - `409 invitation_existing_member` when the registered target is already a member of the workspace
+    - `409 invitation_duplicate_pending` when a pending invite already exists for the same workspace and normalized email
+    - `422 validation_failed` for invalid email or invalid role
 
 ### GET `/api/v1/workspaces/{workspaceID}/invitations`
 - Auth: yes (`owner`)
@@ -588,6 +600,17 @@ Exception:
     - `status=all` applies no status filter
     - empty result set returns `200` with `items=[]`, `has_more=false`
     - `next_cursor` is omitted on the final page
+- Frontend usage:
+    - For authenticated users with zero workspace memberships, `GET /api/v1/my/invitations?status=pending` is the authoritative invitation-review source.
+    - Canonical no-workspace entry flow:
+      1. call `GET /api/v1/workspaces`
+      2. if the workspace list is empty, call `GET /api/v1/my/invitations?status=pending`
+      3. if pending invitations exist, route to pending invitation review before empty-workspace onboarding
+      4. if no pending invitations exist, continue to empty-workspace onboarding
+    - Invitation rows from this endpoint, not notification payloads, should drive accept/reject actions and pending-invitation review state.
+    - After accepting or rejecting from this entry path, refresh both:
+      - `GET /api/v1/workspaces`
+      - `GET /api/v1/my/invitations?status=pending`
 
 ### PATCH `/api/v1/workspace-invitations/{invitationID}`
 - Auth: yes (`owner`)

@@ -125,10 +125,32 @@ func TestLoadValidationAndLogLevel(t *testing.T) {
 	if len(cfg.TrustedProxyCIDRs) != 2 {
 		t.Fatalf("expected trusted proxy cidrs to be parsed, got %+v", cfg.TrustedProxyCIDRs)
 	}
+	if cfg.CORSAllowedOrigins != nil {
+		t.Fatalf("expected nil cors allowed origins by default, got %+v", cfg.CORSAllowedOrigins)
+	}
 
 	cfg.AppEnv = "production"
 	if cfg.LogLevel() != slog.LevelInfo {
 		t.Fatalf("expected info level in production, got %v", cfg.LogLevel())
+	}
+}
+
+func TestLoadParsesCORSAllowedOrigins(t *testing.T) {
+	chdirTemp(t)
+	t.Setenv("POSTGRES_DSN", "postgres://test:test@localhost:5432/test?sslmode=disable")
+	t.Setenv("JWT_SECRET", strings.Repeat("a", 32))
+	t.Setenv("CORS_ALLOWED_ORIGINS", " http://localhost:5173 , https://frontend.example.com ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.CORSAllowedOrigins) != 2 {
+		t.Fatalf("expected two cors origins, got %+v", cfg.CORSAllowedOrigins)
+	}
+	if cfg.CORSAllowedOrigins[0] != "http://localhost:5173" || cfg.CORSAllowedOrigins[1] != "https://frontend.example.com" {
+		t.Fatalf("unexpected cors origins: %+v", cfg.CORSAllowedOrigins)
 	}
 }
 
