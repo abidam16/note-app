@@ -4,6 +4,7 @@
 This section supersedes older references below if they differ.
 
 Current completed feature:
+- Invitation roadmap Task 31 complete: invitation notification rows from the legacy create path, inbox list, mark-read responses, projector replay, and reconciliation now align on the populated invitation payload contract; inbox payloads are usable for inline invitation actions while `workspace_invitations` and `GET /api/v1/my/invitations` remain the authority for invitation review state
 - Invitation roadmap Task 30 complete: the frontend-facing contract now defines a canonical no-workspace invitation-first entry flow using existing backend surfaces only; clients must check `GET /api/v1/workspaces` first, then `GET /api/v1/my/invitations?status=pending` before empty-workspace onboarding, while `GET /api/v1/auth/me` remains identity-only and notifications/SSE remain convenience surfaces rather than the routing authority
 - Invitation roadmap Task 29 complete: invite-create now allows only registered accounts, rejects self-invite explicitly, preserves existing-member and duplicate-pending rejection, exposes distinct `409` API error codes for all four invalid create outcomes, and aligns invite-create service tests, HTTP tests, frontend contract docs, and checkpoint state with runtime behavior
 - ADR set added under `docs/adr/` to lock notification projection boundaries, thread-primary collaboration guidance, draft versus revision state separation, and invitation concurrency rules for future planning and review; titles and context wording were then tightened for reuse clarity; no runtime behavior changed
@@ -76,6 +77,39 @@ Current next strict roadmap feature:
   - cybersecurity roadmap scope complete for current code-level tasks
 
 What was completed in this session:
+- Completed invitation roadmap Task 31:
+  - invitation notifications created through `NotificationService.NotifyInvitationCreated` now reuse the same invitation payload mapping as projector and reconciliation paths instead of storing `payload = {}`
+  - invitation inbox rows and mark-read responses now expose populated payload fields for:
+    - `invitation_id`
+    - `workspace_id`
+    - `email`
+    - `role`
+    - `status`
+    - `version`
+    - `can_accept`
+    - `can_reject`
+  - pending invitation rows remain actionable and terminal invitation rows remain non-actionable with payload booleans aligned to invitation state
+  - added regression coverage across:
+    - notification service direct create path
+    - invitation projector payload mapping
+    - reconciliation payload generation
+    - PostgreSQL live invitation replay and mark-read preservation
+    - HTTP inbox list and mark-read responses
+  - updated:
+    - `internal/application/notification_service.go`
+    - `internal/application/notification_service_test.go`
+    - `internal/application/invitation_notification_projector_test.go`
+    - `internal/application/notification_reconciliation_test.go`
+    - `internal/repository/postgres/content_repository_test.go`
+    - `internal/repository/postgres/notification_replay_idempotency_test.go`
+    - `internal/transport/http/server_test.go`
+    - `frontend-repo/API_CONTRACT.md`
+    - `frontend-repo/API_DELTA_NOTIFICATION_INVITATION.md`
+    - `docs/checkpoint.md`
+  - verification:
+    - `go test ./internal/application -run "TestNotificationService|TestInvitationNotificationProjector|TestNotificationReconciliationServiceRun|TestNotificationProjectionConcurrencyInvitationReplayPreservesReadState" -count=1`
+    - `go test ./internal/repository/postgres -run "TestRevisionCommentNotificationRepositoriesIntegration|TestNotificationReplayIdempotencyInvitationLiveReadState|TestNotificationReconciliationRepositoryIntegration" -count=1`
+    - `go test ./internal/transport/http -run "TestNotificationEndpoints" -count=1`
 - Completed invitation roadmap Task 30:
   - documented the canonical no-workspace invitation-first entry contract using existing backend surfaces only
   - clarified:
@@ -1224,10 +1258,10 @@ Local runtime state after verification:
 
 ## Current State
 Completed roadmap features:
-- Invitation roadmap Task 29 complete for the invite-create eligibility and error-outcome alignment slice
+- Invitation roadmap Task 31 complete for the invitation notification payload contract alignment slice
 
 Backend status:
-- Invitation, notification inbox, unread counter, transactional thread outbox, mention schema, create-thread mention write support, reply mention support, mention notification projection, per-thread notification preference read/write, SSE notification stream, notification reconciliation, concurrency/load verification, and invite-create eligibility/error-outcome alignment are implemented through Task 29
+- Invitation, notification inbox, unread counter, transactional thread outbox, mention schema, create-thread mention write support, reply mention support, mention notification projection, per-thread notification preference read/write, SSE notification stream, notification reconciliation, concurrency/load verification, invite-create eligibility/error-outcome alignment, no-workspace invitation-first entry contract guidance, and invitation notification payload contract alignment are implemented through Task 31
 - Available thread endpoints:
   - `POST /api/v1/pages/{pageID}/threads`
   - `GET /api/v1/pages/{pageID}/threads`

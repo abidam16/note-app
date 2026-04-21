@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -260,6 +261,9 @@ func TestNotificationServicePublishesInvitationAndCommentEvents(t *testing.T) {
 		ID:          "inv-1",
 		WorkspaceID: "workspace-1",
 		Email:       "invited@example.com",
+		Role:        domain.RoleViewer,
+		Status:      domain.WorkspaceInvitationStatusPending,
+		Version:     1,
 		InvitedBy:   "owner-1",
 	})
 	if err != nil {
@@ -270,6 +274,9 @@ func TestNotificationServicePublishesInvitationAndCommentEvents(t *testing.T) {
 		ID:          "inv-1",
 		WorkspaceID: "workspace-1",
 		Email:       "invited@example.com",
+		Role:        domain.RoleViewer,
+		Status:      domain.WorkspaceInvitationStatusPending,
+		Version:     1,
 		InvitedBy:   "owner-1",
 	})
 	if err != nil {
@@ -317,8 +324,28 @@ func TestNotificationServicePublishesInvitationAndCommentEvents(t *testing.T) {
 	if invitationNotification.ResourceType == nil || *invitationNotification.ResourceType != domain.NotificationResourceTypeInvitation || invitationNotification.ResourceID == nil || *invitationNotification.ResourceID != "inv-1" {
 		t.Fatalf("unexpected invitation resource metadata: %+v", invitationNotification)
 	}
-	if invitationNotification.IsRead || invitationNotification.UpdatedAt.IsZero() || string(invitationNotification.Payload) != "{}" {
+	if invitationNotification.IsRead || invitationNotification.UpdatedAt.IsZero() {
 		t.Fatalf("unexpected invitation read/payload metadata: %+v", invitationNotification)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(invitationNotification.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal invitation payload: %v", err)
+	}
+	if payload["invitation_id"] != "inv-1" ||
+		payload["workspace_id"] != "workspace-1" ||
+		payload["email"] != "invited@example.com" ||
+		payload["role"] != string(domain.RoleViewer) ||
+		payload["status"] != string(domain.WorkspaceInvitationStatusPending) {
+		t.Fatalf("unexpected invitation payload fields: %+v", payload)
+	}
+	if version, ok := payload["version"].(float64); !ok || version != 1 {
+		t.Fatalf("expected version=1 in payload, got %+v", payload["version"])
+	}
+	if canAccept, ok := payload["can_accept"].(bool); !ok || !canAccept {
+		t.Fatalf("expected can_accept=true in payload, got %+v", payload["can_accept"])
+	}
+	if canReject, ok := payload["can_reject"].(bool); !ok || !canReject {
+		t.Fatalf("expected can_reject=true in payload, got %+v", payload["can_reject"])
 	}
 
 	var sawCommentV2 bool

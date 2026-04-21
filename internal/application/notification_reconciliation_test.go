@@ -3,6 +3,7 @@ package application
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"testing"
@@ -542,6 +543,13 @@ func TestNotificationReconciliationServiceRun(t *testing.T) {
 		resetRepo()
 
 		invitationNotification := buildInvitationNotification(repo.invitationPages[0].Items[0].Invitation, invitedUserID)
+		var invitationPayload map[string]any
+		if err := json.Unmarshal(invitationNotification.Payload, &invitationPayload); err != nil {
+			t.Fatalf("unmarshal reconciliation invitation payload: %v", err)
+		}
+		if invitationPayload["invitation_id"] != repo.invitationPages[0].Items[0].Invitation.ID || invitationPayload["workspace_id"] != workspaceID || invitationPayload["email"] != "invitee@example.com" || invitationPayload["role"] != string(domain.RoleViewer) || invitationPayload["status"] != string(domain.WorkspaceInvitationStatusPending) {
+			t.Fatalf("unexpected reconciliation invitation payload: %+v", invitationPayload)
+		}
 		commentNotification := mapCommentNotification(domain.OutboxTopicThreadReplyCreated, commentNotificationPayload{
 			ThreadID:       threadID,
 			MessageID:      "m2",

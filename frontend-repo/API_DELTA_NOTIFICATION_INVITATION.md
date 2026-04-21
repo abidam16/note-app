@@ -73,12 +73,15 @@ This doc covers only backend additions and changed behavior relevant to the fron
   - Query: `status?=all|read|unread`, `type?=all|invitation|comment|mention`, `limit?`, `cursor?`
   - Response used by UI: `items[]` with `id`, `type`, `title`, `content`, `is_read`, `read_at`, `actionable`, `action_kind`, `resource_type`, `resource_id`, `payload`, `created_at`, `updated_at`, plus `unread_count`, `next_cursor`, `has_more`
   - UI notes: this is the canonical inbox list; `unread_count` is the user total, not the filtered subset.
+  - UI notes: invitation rows now include populated payload fields for `invitation_id`, `workspace_id`, `email`, `role`, `status`, `version`, `can_accept`, and `can_reject`.
+  - UI notes: notification payloads are usable for inline invitation actions from the inbox, but they remain a convenience surface rather than the invitation source of truth.
   - Errors / edge cases: invalid `status`, `type`, `limit`, or `cursor` returns `422`; `actor` metadata may be `null`.
 
 - `POST /api/v1/notifications/{notificationID}/read`
   - Auth: notification owner
   - Response used by UI: same inbox item DTO, with `is_read: true` and `read_at` set
   - UI notes: opening a row does not mark it read by itself. Use this endpoint only when the product explicitly decides to mark one notification read, such as after opening a detail view or after an invitation action succeeds.
+  - UI notes: invitation rows preserve the same populated payload fields returned by inbox listing.
   - Errors / edge cases: malformed, missing, or foreign notification IDs return `404`; repeated reads are idempotent.
 
 - `POST /api/v1/notifications/read`

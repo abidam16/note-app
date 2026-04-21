@@ -7,7 +7,7 @@ The goal is to make the collaboration inbox reliable, clear, and safe under conc
 
 This roadmap does not extend legacy flat `page_comments`. New product work should build on thread endpoints and thread messages. Legacy flat comments remain supported only for backward compatibility.
 
-Original roadmap scope for Tasks 1 through 28 is complete and tracked in `docs/checkpoint.md`. This roadmap now also carries the next follow-on slice required by the 2026-04-18 PRD update for invitation eligibility and no-workspace invitation-first entry behavior.
+Original roadmap scope for Tasks 1 through 28 is complete and tracked in `docs/checkpoint.md`. Follow-on Tasks 29 through 31 are also complete and recorded there. Current roadmap scope is complete through Task 31.
 
 ## Diagnosis
 The original initiative started from three core gaps:
@@ -20,6 +20,11 @@ The current backend now also has invitation-policy drift against the updated PRD
 - self-invite is not enforced as a distinct invalid create case
 - invalid create cases are not all distinguishable to clients
 - no-workspace post-auth entry still depends on the client coordinating workspace and invitation calls explicitly
+
+The current backend also has invitation-notification contract drift against the inbox API contract:
+- invitation notification rows can be returned as `actionable: true` while `payload` is empty
+- `GET /api/v1/notifications` and `POST /api/v1/notifications/{notificationID}/read` can disagree with the documented invitation payload shape
+- the legacy create-path notification write can diverge from the richer projector and reconciliation payload shape
 
 The core design problem is not only API shape. It is consistency. Invitation rows, thread messages, notification rows, and unread counts must stay aligned even when multiple actors act at the same time.
 
@@ -74,7 +79,7 @@ The core design problem is not only API shape. It is consistency. Invitation row
 - `blocked`
 
 ## Current Task
-- `not_started` Task 29: invitation eligibility and no-workspace entry alignment
+- No active task. Current roadmap scope is complete through Task 31.
 
 ## Phases
 - Phase 1: MVP foundation and invitation lifecycle
@@ -83,6 +88,7 @@ The core design problem is not only API shape. It is consistency. Invitation row
 - Phase 4: mention support
 - Phase 5: advanced control, real-time delivery, and recovery
 - Phase 6: invitation eligibility and no-workspace entry alignment
+- Phase 7: invitation notification payload contract alignment
 
 ## Tasks
 
@@ -647,7 +653,7 @@ Tasks 1 through 28 are preserved as the historical delivery record for the origi
    - Negative codes: none
 
 ## Execution Order
-The execution order below is the historical order for Tasks 1 through 28. The new follow-on planning path starts with Task 29 in Phase 6.
+The execution order below is the historical order for Tasks 1 through 28. The new follow-on planning path now extends through Tasks 29 to 31 across Phases 6 and 7.
 
 - Start with invitation schema and invitation endpoints.
 - Build outbox and invitation projector before broad inbox work.
@@ -669,8 +675,12 @@ The execution order below is the historical order for Tasks 1 through 28. The ne
 - Invite-create policy matches the PRD target for registered-account-only eligibility and self-invite rejection.
 - Frontend-facing contract docs make current implementation drift explicit until backend behavior is aligned.
 - Authenticated users with no workspace memberships have a canonical invitation-review-first path before empty-workspace onboarding.
+- Invitation notification rows returned by inbox and mark-read endpoints include contract-valid payload fields that stay logically consistent with `actionable` state.
 
 ## Follow-On Phase 6: Invitation Eligibility And No-Workspace Entry Alignment
+
+- Status:
+  Complete and tracked in `docs/checkpoint.md`. This phase remains here as the historical bridge from the 2026-04-18 PRD update into bounded follow-on planning.
 
 - Objective:
   Align invitation create behavior and the frontend-facing contract with the updated PRD without reopening the completed invitation lifecycle and notification architecture work.
@@ -702,7 +712,7 @@ The execution order below is the historical order for Tasks 1 through 28. The ne
 
 ### Follow-On Planning Candidates
 
-29. `not_started` Invite-create eligibility and error-outcome alignment
+29. `done` Invite-create eligibility and error-outcome alignment
    - Goal: align `POST /api/v1/workspaces/{workspaceID}/invitations` with registered-account-only targeting and explicit invalid-case outcomes.
    - Why now: this endpoint is the main remaining product drift after the original invitation lifecycle work.
    - In scope:
@@ -721,7 +731,7 @@ The execution order below is the historical order for Tasks 1 through 28. The ne
    - Exit criteria:
      - docs, tests, and endpoint behavior agree on the allowed invite targets and invalid cases
 
-30. `not_started` No-workspace invitation-first entry contract
+30. `done` No-workspace invitation-first entry contract
    - Goal: give clients a canonical way to route authenticated users with zero memberships into pending invitation review before empty-workspace onboarding.
    - Why now: the product rule is now explicit, but current client behavior still has to infer it from multiple surfaces.
    - In scope:
@@ -738,22 +748,83 @@ The execution order below is the historical order for Tasks 1 through 28. The ne
    - Exit criteria:
      - frontend contract documents a stable invitation-review-first flow for users with no memberships
 
+## Follow-On Phase 7: Invitation Notification Payload Contract Alignment
+
+- Status:
+  Complete and tracked in `docs/checkpoint.md`.
+
+- Objective:
+  Align invitation notification rows with the documented inbox contract so notification surfaces can safely expose inline accept and reject actions while invitation source data remains authoritative.
+- Why this phase exists now:
+  The initiative already delivered invitation lifecycle, inbox projection, reconciliation, invite-create eligibility alignment, and no-workspace entry guidance, but a confirmed 2026-04-19 user report shows invitation notification rows can still be emitted with empty payloads despite being marked actionable.
+- Key outcomes:
+  - invitation notification rows returned by inbox and mark-read endpoints include populated invitation action payload fields
+  - `actionable`, `action_kind`, and payload contents remain logically consistent for pending and terminal invitation states
+  - legacy direct-write, projector, and reconciliation paths converge on one invitation notification payload shape
+  - regression coverage locks the payload contract at the endpoint and projection levels
+- In scope:
+  - invitation notification payload alignment for `GET /api/v1/notifications`
+  - invitation notification payload alignment for `POST /api/v1/notifications/{notificationID}/read`
+  - shared invitation payload mapping across direct create, projector, and reconciliation paths
+  - regression tests for pending and terminal invitation notification payloads
+- Out of scope:
+  - changing invitation accept or reject authority away from `workspace_invitations`
+  - redesigning the notification inbox UX or adding new notification action types
+  - broader always-on worker rollout or notification architecture replacement
+- Dependencies:
+  - invitation lifecycle and notification projection work from Tasks 1 through 28
+  - follow-on Tasks 29 and 30 are complete
+  - existing frontend-facing API contract for invitation notification payload fields
+- Risks:
+  - fixing only one write or read path could preserve hidden drift and let reconciliation or replay reintroduce empty payload rows
+  - careless updates to live invitation upsert behavior could disturb read-state preservation or one-row-per-invitation semantics
+- Exit criteria:
+  - inbox and mark-read responses return populated invitation payloads with `invitation_id`, `workspace_id`, `email`, `role`, `status`, `version`, `can_accept`, and `can_reject`
+  - pending invitation notifications remain actionable with `can_accept=true` and `can_reject=true`
+  - terminal invitation notifications remain non-actionable with payload reflecting terminal state
+  - direct create, projector replay, and reconciliation agree on the same invitation notification payload contract
+
+### Follow-On Planning Candidate
+
+31. `done` Invitation notification payload contract alignment
+   - Goal: align invitation notification payloads across stored rows, projection, and endpoint responses so notifications can act as a convenience action surface without becoming the source of truth.
+   - Why now: the contract regression is confirmed in live list and mark-read responses and blocks the expected notification-driven invitation UX.
+   - In scope:
+     - populate the documented invitation payload fields for notification rows
+     - keep invitation notifications one live row per invitation
+     - preserve read-state and unread-counter correctness during invitation notification updates
+     - add regression coverage for list, mark-read, replay, and reconciliation payload consistency
+   - Out of scope:
+     - changing invitation accept and reject endpoints
+     - replacing `My invitations` as the canonical invitation review surface
+     - adding new notification action kinds beyond invitation response
+   - Dependencies:
+     - completed invitation notification projector and reconciliation support
+     - existing invitation inbox contract documentation
+   - Risks:
+     - payload mapping drift can recur if multiple code paths keep separate invitation notification builders
+     - endpoint-only fixes can hide storage or replay inconsistencies until later reconciliation runs
+   - Exit criteria:
+     - docs, endpoint behavior, and projection behavior agree on the invitation notification payload shape
+     - frontend notification surfaces can render invitation actions from payload without fallback-only behavior
+
 ## Decision
 - `INITIATIVE_ROADMAP_UPDATE`
 
 ## Why This Decision
 - The initiative already exists and the original invitation-notification scope remains the right execution container.
-- The new work is a follow-on product-alignment slice, not a separate initiative.
+- The new work is a follow-on contract-alignment slice, not a separate initiative.
 - The next need is sequencing and planning for bounded implementation, not another PRD or ADR.
 
 ## What Planning Should Do Next
-- Create a single-task plan for follow-on candidate 29 first.
-- Keep candidate 30 separate unless candidate 29 proves a bootstrap contract change is required.
+- No additional approved follow-on task exists in this roadmap yet.
+- If new invitation or notification scope appears, start with a new brainstorm and then either extend this roadmap or create a new initiative roadmap.
 
 ## What Is Explicitly Deferred Or Not Next
 - Outbound invitation delivery is not next.
 - Ownership-transfer policy is not next.
 - Reworking the completed notification architecture is not next.
+- Replacing invitation source data with notification-derived authority is not next.
 
 ## Immediate Next Step
-- Proceed to create a single-task plan for Task 29: invite-create eligibility and error-outcome alignment.
+- No immediate roadmap execution step remains inside this roadmap. Start a new brainstorm before adding more follow-on work.

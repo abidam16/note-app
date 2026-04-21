@@ -1462,6 +1462,8 @@ Flat comments remain page-level only and do not support replies, anchors, `ancho
     - `next_cursor` is omitted on the final page
     - `actor` is `null` when actor metadata is unavailable
     - invitation rows reflect the latest live invitation state and do not duplicate the same invitation
+    - invitation rows include populated payload fields for `invitation_id`, `workspace_id`, `email`, `role`, `status`, `version`, `can_accept`, and `can_reject`
+    - invitation notification payloads may be used for inline inbox accept/reject actions, but they do not replace invitation source-of-truth ownership
     - comment rows are projected asynchronously from `thread_created` and `thread_reply_created` outbox events
     - comment rows use `type = comment`, `resource_type = thread_message`, and payload fields for `thread_id`, `message_id`, `page_id`, `workspace_id`, and `event_topic`
     - comment rows are delivered only to relevant users, not to the full workspace
@@ -1516,6 +1518,7 @@ Flat comments remain page-level only and do not support replies, anchors, `ancho
     - first unread-to-read transition sets `is_read=true`, `read_at`, and `updated_at`
     - repeated mark-read stays `200` and preserves the original `read_at` and `updated_at`
     - returns the same inbox item DTO used by `GET /api/v1/notifications`
+    - invitation rows preserve the same populated invitation payload fields returned by inbox listing
 
 ### POST `/api/v1/notifications/read`
 - Auth: yes

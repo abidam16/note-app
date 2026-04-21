@@ -172,6 +172,8 @@ func TestNotificationReplayIdempotencyInvitationLiveReadState(t *testing.T) {
 			"can_reject":    true,
 			"workspace_id":  workspace.ID,
 			"invitation_id": invitationID,
+			"email":         member.Email,
+			"role":          string(domain.RoleViewer),
 		}),
 		CreatedAt: createdAt,
 		UpdatedAt: createdAt,
@@ -216,6 +218,8 @@ func TestNotificationReplayIdempotencyInvitationLiveReadState(t *testing.T) {
 			"can_reject":    false,
 			"workspace_id":  workspace.ID,
 			"invitation_id": invitationID,
+			"email":         member.Email,
+			"role":          string(domain.RoleViewer),
 		}),
 		CreatedAt: now.Add(2 * time.Minute),
 		UpdatedAt: now.Add(2 * time.Minute),
@@ -228,6 +232,13 @@ func TestNotificationReplayIdempotencyInvitationLiveReadState(t *testing.T) {
 	}
 	if !updated.IsRead || updated.ReadAt == nil || !updated.ReadAt.Equal(readAt) {
 		t.Fatalf("expected live update to preserve read state, got %+v", updated)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(updated.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal replay invitation payload: %v", err)
+	}
+	if payload["invitation_id"] != invitationID || payload["workspace_id"] != workspace.ID || payload["email"] != member.Email || payload["role"] != string(domain.RoleViewer) || payload["status"] != string(domain.WorkspaceInvitationStatusAccepted) {
+		t.Fatalf("unexpected replay invitation payload: %+v", payload)
 	}
 	if unreadCount, err := repo.GetUnreadCount(ctx, member.ID); err != nil {
 		t.Fatalf("GetUnreadCount() after invitation update error = %v", err)

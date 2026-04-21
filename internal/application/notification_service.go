@@ -110,24 +110,21 @@ func (s NotificationService) NotifyInvitationCreated(ctx context.Context, invita
 		return err
 	}
 
-	_, err = s.notifications.Create(ctx, domain.Notification{
-		ID:           uuid.NewString(),
-		UserID:       user.ID,
-		WorkspaceID:  invitation.WorkspaceID,
-		Type:         domain.NotificationTypeInvitation,
-		EventID:      invitation.ID,
-		Message:      "You have a new workspace invitation",
-		ActorID:      &invitation.InvitedBy,
-		Title:        "Workspace invitation",
-		Content:      "You have a new workspace invitation",
-		IsRead:       false,
-		Actionable:   true,
-		ActionKind:   notificationActionKindPtr(domain.NotificationActionKindInvitationResponse),
-		ResourceType: notificationResourceTypePtr(domain.NotificationResourceTypeInvitation),
-		ResourceID:   &invitation.ID,
-		Payload:      json.RawMessage(`{}`),
-		CreatedAt:    time.Now().UTC(),
-	})
+	now := time.Now().UTC()
+	notification := mapInvitationNotification(domain.OutboxTopicInvitationCreated, invitationPayloadFromInvitation(invitation), user.ID)
+	notification.ID = uuid.NewString()
+	if invitation.CreatedAt.IsZero() {
+		notification.CreatedAt = now
+	} else {
+		notification.CreatedAt = invitation.CreatedAt.UTC()
+	}
+	if invitation.UpdatedAt.IsZero() {
+		notification.UpdatedAt = notification.CreatedAt
+	} else {
+		notification.UpdatedAt = invitation.UpdatedAt.UTC()
+	}
+
+	_, err = s.notifications.Create(ctx, notification)
 	if errors.Is(err, domain.ErrConflict) {
 		return nil
 	}

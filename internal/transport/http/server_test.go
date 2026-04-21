@@ -3959,6 +3959,17 @@ func TestNotificationEndpoints(t *testing.T) {
 	notifications.notifications["22222222-2222-2222-2222-222222222222"] = notifications.ordered[1]
 
 	notificationService := application.NewNotificationService(notifications, users, memberships)
+	if err := notificationService.NotifyInvitationCreated(context.Background(), domain.WorkspaceInvitation{
+		ID:          "inv-2",
+		WorkspaceID: "workspace-1",
+		Email:       "user1@example.com",
+		Role:        domain.RoleViewer,
+		Status:      domain.WorkspaceInvitationStatusPending,
+		Version:     1,
+		InvitedBy:   "owner-1",
+	}); err != nil {
+		t.Fatalf("NotifyInvitationCreated() error = %v", err)
+	}
 	server := NewServer(logger, application.AuthService{}, application.WorkspaceService{}, application.FolderService{}, application.PageService{}, application.RevisionService{}, tokenManager, storage.NewLocal(t.TempDir())).WithNotificationService(notificationService)
 
 	userToken, _, err := tokenManager.GenerateAccessToken("user-1", "user1@example.com", time.Now().UTC())
@@ -3980,8 +3991,21 @@ func TestNotificationEndpoints(t *testing.T) {
 	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("unmarshal list notifications response: %v", err)
 	}
-	if len(listed.Data.Items) != 1 || listed.Data.Items[0].ID != "11111111-1111-1111-1111-111111111111" || listed.Data.UnreadCount != 1 || listed.Data.HasMore {
+	if len(listed.Data.Items) != 2 || listed.Data.Items[0].ResourceID == nil || *listed.Data.Items[0].ResourceID != "inv-2" || listed.Data.Items[1].ID != "11111111-1111-1111-1111-111111111111" || listed.Data.UnreadCount != 2 || listed.Data.HasMore {
 		t.Fatalf("unexpected listed notifications: %+v", listed.Data)
+	}
+	var invitationPayload map[string]any
+	if err := json.Unmarshal(listed.Data.Items[0].Payload, &invitationPayload); err != nil {
+		t.Fatalf("unmarshal listed invitation payload: %v", err)
+	}
+	if invitationPayload["invitation_id"] != "inv-2" || invitationPayload["workspace_id"] != "workspace-1" || invitationPayload["email"] != "user1@example.com" {
+		t.Fatalf("expected populated invitation payload in list response, got %+v", invitationPayload)
+	}
+	if canAccept, ok := invitationPayload["can_accept"].(bool); !ok || !canAccept {
+		t.Fatalf("expected can_accept=true in list payload, got %+v", invitationPayload["can_accept"])
+	}
+	if canReject, ok := invitationPayload["can_reject"].(bool); !ok || !canReject {
+		t.Fatalf("expected can_reject=true in list payload, got %+v", invitationPayload["can_reject"])
 	}
 
 	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v1/notifications?status=unread&type=comment&limit=1", nil)
@@ -4049,8 +4073,8 @@ func TestNotificationEndpoints(t *testing.T) {
 	if err := json.Unmarshal(unreadRec.Body.Bytes(), &unreadPayload); err != nil {
 		t.Fatalf("unmarshal unread-count response: %v", err)
 	}
-	if unreadPayload.Data.UnreadCount != 1 {
-		t.Fatalf("expected unread_count=1, got %+v", unreadPayload.Data)
+	if unreadPayload.Data.UnreadCount != 2 {
+		t.Fatalf("expected unread_count=2, got %+v", unreadPayload.Data)
 	}
 
 	emptyToken, _, err := tokenManager.GenerateAccessToken("user-3", "user3@example.com", time.Now().UTC())
@@ -4080,7 +4104,7 @@ func TestNotificationEndpoints(t *testing.T) {
 		t.Fatalf("expected unknown actor unread-count 401, got %d body=%s", unknownUnreadRec.Code, unknownUnreadRec.Body.String())
 	}
 
-	readReq := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/11111111-1111-1111-1111-111111111111/read", nil)
+	readReq := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/"+listed.Data.Items[0].ID+"/read", nil)
 	readReq.Header.Set("Authorization", "Bearer "+userToken)
 	readRec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(readRec, readReq)
@@ -4097,9 +4121,18 @@ func TestNotificationEndpoints(t *testing.T) {
 	if readPayload.Data.ReadAt == nil || !readPayload.Data.IsRead {
 		t.Fatalf("expected read_at to be set")
 	}
+	if err := json.Unmarshal(readPayload.Data.Payload, &invitationPayload); err != nil {
+		t.Fatalf("unmarshal mark-read invitation payload: %v", err)
+	}
+	if invitationPayload["invitation_id"] != "inv-2" || invitationPayload["workspace_id"] != "workspace-1" || invitationPayload["email"] != "user1@example.com" {
+		t.Fatalf("expected populated invitation payload in mark-read response, got %+v", invitationPayload)
+	}
+	if readPayload.Data.ActionKind == nil || *readPayload.Data.ActionKind != domain.NotificationActionKindInvitationResponse || !readPayload.Data.Actionable {
+		t.Fatalf("expected pending invitation row to remain actionable, got %+v", readPayload.Data)
+	}
 
 	batchNotification, err := notifications.Create(context.Background(), domain.Notification{
-		ID:          "33333333-3333-3333-3333-333333333333",
+		ID:          "44444444-4444-4444-4444-444444444444",
 		UserID:      "user-1",
 		WorkspaceID: "workspace-1",
 		Type:        domain.NotificationTypeComment,
@@ -4126,7 +4159,7 @@ func TestNotificationEndpoints(t *testing.T) {
 	if err := json.Unmarshal(batchRec.Body.Bytes(), &batchPayload); err != nil {
 		t.Fatalf("unmarshal batch read response: %v", err)
 	}
-	if batchPayload.Data.UpdatedCount != 1 || batchPayload.Data.UnreadCount != 0 {
+	if batchPayload.Data.UpdatedCount != 1 || batchPayload.Data.UnreadCount != 1 {
 		t.Fatalf("unexpected batch read payload: %+v", batchPayload.Data)
 	}
 
@@ -4141,8 +4174,98 @@ func TestNotificationEndpoints(t *testing.T) {
 	if err := json.Unmarshal(repeatBatchRec.Body.Bytes(), &batchPayload); err != nil {
 		t.Fatalf("unmarshal repeat batch read response: %v", err)
 	}
-	if batchPayload.Data.UpdatedCount != 0 || batchPayload.Data.UnreadCount != 0 {
+	if batchPayload.Data.UpdatedCount != 0 || batchPayload.Data.UnreadCount != 1 {
 		t.Fatalf("unexpected repeat batch read payload: %+v", batchPayload.Data)
+	}
+
+	invitationResourceType := domain.NotificationResourceTypeInvitation
+	acceptedInvitationID := "inv-3"
+	acceptedInvitationReadAt := time.Date(2026, 3, 8, 5, 5, 0, 0, time.UTC)
+	acceptedInvitationNotification, err := notifications.Create(context.Background(), domain.Notification{
+		ID:           "55555555-5555-5555-5555-555555555555",
+		UserID:       "user-1",
+		WorkspaceID:  "workspace-1",
+		Type:         domain.NotificationTypeInvitation,
+		EventID:      acceptedInvitationID,
+		Message:      "You accepted the workspace invitation",
+		Title:        "Invitation accepted",
+		Content:      "You accepted the workspace invitation",
+		ActorID:      stringPtr("owner-1"),
+		IsRead:       true,
+		ReadAt:       &acceptedInvitationReadAt,
+		Actionable:   false,
+		ResourceType: &invitationResourceType,
+		ResourceID:   &acceptedInvitationID,
+		Payload:      json.RawMessage(`{"invitation_id":"inv-3","workspace_id":"workspace-1","email":"user1@example.com","role":"viewer","status":"accepted","version":2,"can_accept":false,"can_reject":false}`),
+		CreatedAt:    time.Date(2026, 3, 8, 5, 0, 0, 0, time.UTC),
+		UpdatedAt:    time.Date(2026, 3, 8, 5, 5, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("create accepted invitation notification: %v", err)
+	}
+
+	terminalListReq := httptest.NewRequest(http.MethodGet, "/api/v1/notifications?type=invitation&limit=1", nil)
+	terminalListReq.Header.Set("Authorization", "Bearer "+userToken)
+	terminalListRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(terminalListRec, terminalListReq)
+	if terminalListRec.Code != http.StatusOK {
+		t.Fatalf("expected terminal invitation list status 200, got %d body=%s", terminalListRec.Code, terminalListRec.Body.String())
+	}
+
+	var terminalListed struct {
+		Data domain.NotificationInboxPage `json:"data"`
+	}
+	if err := json.Unmarshal(terminalListRec.Body.Bytes(), &terminalListed); err != nil {
+		t.Fatalf("unmarshal terminal invitation list response: %v", err)
+	}
+	if len(terminalListed.Data.Items) != 1 || terminalListed.Data.Items[0].ID != acceptedInvitationNotification.ID {
+		t.Fatalf("unexpected terminal invitation list payload: %+v", terminalListed.Data)
+	}
+	if terminalListed.Data.Items[0].Actionable || terminalListed.Data.Items[0].ActionKind != nil {
+		t.Fatalf("expected terminal invitation row to be non-actionable in list response, got %+v", terminalListed.Data.Items[0])
+	}
+	var terminalInvitationPayload map[string]any
+	if err := json.Unmarshal(terminalListed.Data.Items[0].Payload, &terminalInvitationPayload); err != nil {
+		t.Fatalf("unmarshal terminal invitation payload: %v", err)
+	}
+	if terminalInvitationPayload["invitation_id"] != acceptedInvitationID || terminalInvitationPayload["status"] != string(domain.WorkspaceInvitationStatusAccepted) {
+		t.Fatalf("expected accepted invitation payload in list response, got %+v", terminalInvitationPayload)
+	}
+	if canAccept, ok := terminalInvitationPayload["can_accept"].(bool); !ok || canAccept {
+		t.Fatalf("expected can_accept=false in terminal list payload, got %+v", terminalInvitationPayload["can_accept"])
+	}
+	if canReject, ok := terminalInvitationPayload["can_reject"].(bool); !ok || canReject {
+		t.Fatalf("expected can_reject=false in terminal list payload, got %+v", terminalInvitationPayload["can_reject"])
+	}
+
+	terminalReadReq := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/"+acceptedInvitationNotification.ID+"/read", nil)
+	terminalReadReq.Header.Set("Authorization", "Bearer "+userToken)
+	terminalReadRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(terminalReadRec, terminalReadReq)
+	if terminalReadRec.Code != http.StatusOK {
+		t.Fatalf("expected terminal invitation read status 200, got %d body=%s", terminalReadRec.Code, terminalReadRec.Body.String())
+	}
+
+	var terminalReadPayload struct {
+		Data domain.NotificationInboxItem `json:"data"`
+	}
+	if err := json.Unmarshal(terminalReadRec.Body.Bytes(), &terminalReadPayload); err != nil {
+		t.Fatalf("unmarshal terminal invitation read response: %v", err)
+	}
+	if terminalReadPayload.Data.Actionable || terminalReadPayload.Data.ActionKind != nil {
+		t.Fatalf("expected terminal invitation row to stay non-actionable after mark-read, got %+v", terminalReadPayload.Data)
+	}
+	if err := json.Unmarshal(terminalReadPayload.Data.Payload, &terminalInvitationPayload); err != nil {
+		t.Fatalf("unmarshal terminal invitation mark-read payload: %v", err)
+	}
+	if terminalInvitationPayload["invitation_id"] != acceptedInvitationID || terminalInvitationPayload["status"] != string(domain.WorkspaceInvitationStatusAccepted) {
+		t.Fatalf("expected accepted invitation payload in mark-read response, got %+v", terminalInvitationPayload)
+	}
+	if canAccept, ok := terminalInvitationPayload["can_accept"].(bool); !ok || canAccept {
+		t.Fatalf("expected can_accept=false in terminal mark-read payload, got %+v", terminalInvitationPayload["can_accept"])
+	}
+	if canReject, ok := terminalInvitationPayload["can_reject"].(bool); !ok || canReject {
+		t.Fatalf("expected can_reject=false in terminal mark-read payload, got %+v", terminalInvitationPayload["can_reject"])
 	}
 
 	missingReq := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/22222222-2222-2222-2222-222222222222/read", nil)

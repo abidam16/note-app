@@ -148,6 +148,26 @@ func TestInvitationNotificationProjector(t *testing.T) {
 		if last.Actionable || last.ActionKind != nil || last.Title != "Invitation accepted" {
 			t.Fatalf("expected terminal accepted mapping, got %+v", last)
 		}
+		var payload map[string]any
+		if err := json.Unmarshal(last.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal invitation projector payload: %v", err)
+		}
+		if payload["invitation_id"] != "inv-1" ||
+			payload["workspace_id"] != "workspace-1" ||
+			payload["email"] != "invitee@example.com" ||
+			payload["role"] != string(domain.RoleEditor) ||
+			payload["status"] != string(domain.WorkspaceInvitationStatusAccepted) {
+			t.Fatalf("unexpected invitation projector payload: %+v", payload)
+		}
+		if version, ok := payload["version"].(float64); !ok || version != 3 {
+			t.Fatalf("expected version=3 in projector payload, got %+v", payload["version"])
+		}
+		if canAccept, ok := payload["can_accept"].(bool); !ok || canAccept {
+			t.Fatalf("expected can_accept=false in projector payload, got %+v", payload["can_accept"])
+		}
+		if canReject, ok := payload["can_reject"].(bool); !ok || canReject {
+			t.Fatalf("expected can_reject=false in projector payload, got %+v", payload["can_reject"])
+		}
 		if len(outbox.processedIDs) != 3 {
 			t.Fatalf("expected all events marked processed, got %+v", outbox.processedIDs)
 		}

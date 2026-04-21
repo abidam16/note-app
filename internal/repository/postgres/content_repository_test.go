@@ -1526,7 +1526,7 @@ func TestRevisionCommentNotificationRepositoriesIntegration(t *testing.T) {
 		ActionKind:   &invitationActionKind,
 		ResourceType: &invitationResourceType,
 		ResourceID:   &invitationID,
-		Payload:      json.RawMessage(`{"status":"pending","version":1,"can_accept":true,"can_reject":true}`),
+		Payload:      json.RawMessage(`{"invitation_id":"` + invitationID + `","workspace_id":"` + workspace.ID + `","email":"` + member.Email + `","role":"viewer","status":"pending","version":1,"can_accept":true,"can_reject":true}`),
 		CreatedAt:    createdAt,
 		UpdatedAt:    createdAt,
 	})
@@ -1543,8 +1543,16 @@ func TestRevisionCommentNotificationRepositoriesIntegration(t *testing.T) {
 	}
 
 	readAt := now.Add(5 * time.Minute)
-	if _, err := notifRepo.MarkRead(ctx, liveCreate.ID, member.ID, readAt); err != nil {
+	markedLive, err := notifRepo.MarkRead(ctx, liveCreate.ID, member.ID, readAt)
+	if err != nil {
 		t.Fatalf("mark live invitation read: %v", err)
+	}
+	var markedPayload map[string]any
+	if err := json.Unmarshal(markedLive.Payload, &markedPayload); err != nil {
+		t.Fatalf("unmarshal marked invitation payload: %v", err)
+	}
+	if markedPayload["invitation_id"] != invitationID || markedPayload["workspace_id"] != workspace.ID || markedPayload["email"] != member.Email || markedPayload["role"] != string(domain.RoleViewer) {
+		t.Fatalf("expected mark-read to preserve invitation payload fields, got %+v", markedPayload)
 	}
 	if unreadCount, err := notifRepo.GetUnreadCount(ctx, member.ID); err != nil {
 		t.Fatalf("get unread count after live invitation read: %v", err)
@@ -1565,7 +1573,7 @@ func TestRevisionCommentNotificationRepositoriesIntegration(t *testing.T) {
 		Actionable:   false,
 		ResourceType: &invitationResourceType,
 		ResourceID:   &invitationID,
-		Payload:      json.RawMessage(`{"status":"accepted","version":2,"can_accept":false,"can_reject":false}`),
+		Payload:      json.RawMessage(`{"invitation_id":"` + invitationID + `","workspace_id":"` + workspace.ID + `","email":"` + member.Email + `","role":"viewer","status":"accepted","version":2,"can_accept":false,"can_reject":false}`),
 		CreatedAt:    now.Add(6 * time.Minute),
 		UpdatedAt:    now.Add(6 * time.Minute),
 	})
@@ -1595,7 +1603,7 @@ func TestRevisionCommentNotificationRepositoriesIntegration(t *testing.T) {
 		Actionable:   false,
 		ResourceType: &invitationResourceType,
 		ResourceID:   &invitationID,
-		Payload:      json.RawMessage(`{"status":"accepted","version":2,"can_accept":false,"can_reject":false}`),
+		Payload:      json.RawMessage(`{"invitation_id":"` + invitationID + `","workspace_id":"` + workspace.ID + `","email":"` + member.Email + `","role":"viewer","status":"accepted","version":2,"can_accept":false,"can_reject":false}`),
 		CreatedAt:    now.Add(7 * time.Minute),
 		UpdatedAt:    now.Add(7 * time.Minute),
 	}); err != nil {
