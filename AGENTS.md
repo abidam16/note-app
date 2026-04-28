@@ -47,27 +47,50 @@ If the correct direction is not clear from the task, stop and ask.
 
 ## 1.5 Workflow Routing
 
-Use `docs/workflow/ARTIFACT_DECISION_MATRIX.md` to decide the correct next artifact or phase.
-Use `docs/workflow/HANDOFF_CONTRACTS.md` to determine the minimum required input/output fields between phases.
+Use these shared workflow docs as the canonical workflow policy:
 
-For non-trivial work, prefer phase-by-phase progression:
-- brainstorm -> PRD or ADR if needed -> roadmap -> single-task plan -> implementation -> review
+- `docs/workflow/ARTIFACT_DECISION_MATRIX.md`
+- `docs/workflow/HANDOFF_CONTRACTS.md`
+- `docs/workflow/CONCRETE_NEXT_STEP_CONTRACT.md`
+- `docs/workflow/NEXT_STEP_TYPES.md`
+- `docs/workflow/LIGHTWEIGHT_TASK_MODE.md`
+- `docs/workflow/ARTIFACT_CONSISTENCY_REVIEW_CONTRACT.md`
 
-Do not skip forward when upstream decisions are still unresolved.
+Default to the normal durable-artifact workflow.
+
+Use lightweight mode only when the task clearly passes the eligibility rules in `docs/workflow/LIGHTWEIGHT_TASK_MODE.md`.
+
+If uncertain, do not use lightweight mode.
+
+For non-trivial work, progress phase by phase:
+
+- brainstorm-gate
+- PRD when product behavior or product rules need clarification
+- ARCHITECTURE when system shape, boundaries, data ownership, runtime flow, or integration rules need clarification
+- ADR when one durable technical decision must be recorded
+- ROADMAP when staged delivery or sequencing is required
+- PLAN for one bounded implementation task
+- IMPLEMENT
+- REVIEW
+
+Do not create every artifact every time. Choose the next artifact/action required by the current uncertainty.
 
 ## 1.6 Skill Usage
 
-Use the repo workflow skills when the task is non-trivial or document-producing:
+Use the repo workflow skills when the task is non-trivial, document-producing, architecture-sensitive, or review-oriented:
+
 - `brainstorm-gate`
 - `prd-writer`
+- `architecture-writer`
 - `adr-writer`
 - `roadmap-planner`
 - `plan-writer`
 - `implement-task`
 - `review-phase`
 
-Use each skill for its own phase only.
-Do not collapse multiple phases into one step unless the decision matrix clearly allows it.
+Use each skill for its own phase only. Do not collapse multiple phases into one step unless the decision matrix clearly allows it.
+
+All workflow-phase outputs must end with exactly one `Concrete Next Step` block.
 
 ## 2. Delivery Order
 
@@ -85,54 +108,40 @@ Do not collapse multiple phases into one step unless the decision matrix clearly
 
 Before starting work, classify the task into one of these:
 
-### Small task
-Use direct implementation when all of these are true:
-- the change preserves existing product and architecture semantics
-- no API contract changes are required
-- no schema or migration changes are required
-- no permission or role behavior changes are required
-- no consistency, concurrency, revision, or notification semantics change
-- the work is local to one layer, or a narrow path across two layers following an existing pattern
+### Lightweight task
 
-Examples:
-- local bug fix
-- test addition
-- small refactor with no behavior change
-- narrow endpoint fix with unchanged contract
-- validation adjustment without model or permission change
+Use lightweight mode only when all of these are true:
+
+- one primary objective
+- local and low-risk change
+- preserves existing product behavior
+- preserves existing architecture semantics
+- no API contract change
+- no schema or migration change
+- no permission, role, visibility, or security behavior change
+- no consistency, concurrency, idempotency, revision, notification, projection, or async behavior change
+- no source-of-truth ownership change
+- no ADR-worthy decision
+- no roadmap sequencing needed
+- validation is small and explicit
+
+If any condition is unclear, use the normal workflow.
 
 ### Planned task
-Use a task plan when any of these are true:
+
+Use a full task plan when any of these are true:
+
 - API behavior or payload shape changes
 - schema, migration, or persistence semantics change
 - permissions, roles, or visibility rules change
 - consistency, concurrency, idempotency, or revision behavior change
 - notification, projection, or async behavior change
 - source-of-truth ownership is affected
-- the work spans multiple layers with non-trivial coordination
+- architecture boundaries are affected
+- ADR-worthy decision may be involved
+- work spans multiple layers with non-trivial coordination
 
 A plan should cover one task only. If the work contains multiple primary objectives or unrelated validation paths, split it into multiple plans.
-
-A plan should define:
-- objective
-- scope
-- non-goals
-- affected layers
-- data model impact
-- API contract impact
-- validation rules
-- consistency and permission considerations
-- test strategy
-- acceptance criteria
-
-Inline plans are acceptable for medium-sized work. Use a durable plan document when the work is large enough that execution will span multiple steps, sessions, or pull requests.
-
-### Roadmap task
-Use or update a roadmap when any of these are true:
-- the problem cannot be implemented safely in one reviewable slice
-- multiple ordered phases are required
-- the work includes multiple core features or major cross-cutting changes
-- the repository direction is still being shaped rather than executed
 
 ## 4. Layer Boundaries
 
